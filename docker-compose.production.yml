@@ -3,7 +3,7 @@ services:
     ports: []
 
   frontend:
-    ports: []
+    ports: !reset []
     networks: [internal]
 
   caddy:
