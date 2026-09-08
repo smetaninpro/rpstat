@@ -14,4 +14,4 @@ RUN npm install --omit=dev
 COPY --from=build /app/apps/frontend/.next apps/frontend/.next
 COPY --from=build /app/apps/frontend/next.config.mjs apps/frontend/next.config.mjs
 EXPOSE 3000
-CMD ["node", "apps/frontend/.next/standalone/server.js"]
+CMD ["npm", "run", "start", "--workspace=@rmrp/frontend"]
