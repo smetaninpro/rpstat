@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get -o Acquire::ForceIPv4=true update && apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 COPY apps/backend/package.json apps/backend/package.json
 RUN npm install
@@ -9,7 +9,7 @@ RUN npm run prisma:generate --workspace=@rmrp/backend && npm run build --workspa
 FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get -o Acquire::ForceIPv4=true update && apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 COPY apps/backend/package.json apps/backend/package.json
 RUN npm install --omit=dev
