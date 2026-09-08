@@ -4,6 +4,7 @@ services:
 
   frontend:
     ports: []
+    networks: [internal]
 
   caddy:
     image: caddy:2-alpine
