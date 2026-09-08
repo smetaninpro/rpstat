@@ -25,7 +25,7 @@ export class SessionGuard implements CanActivate {
 }
 @Injectable()
 export class RoleGuard implements CanActivate { canActivate(context: ExecutionContext) { const roles: Role[] = Reflect.getMetadata('roles', context.getHandler()) ?? []; const user = context.switchToHttp().getRequest<Request>().user; if (roles.length && (!user || !roles.includes(user.role))) throw new ForbiddenException(); return true; } }
-class LoginDto { @IsString() @Length(3, 128) username!: string; @IsString() @Length(12, 128) password!: string; }
+class LoginDto { @IsString() @Length(3, 128) username!: string; @IsString() @Length(10, 128) password!: string; }
 @Injectable()
 export class AuthService {
   private readonly attempts = new Map<string, { count: number; resetAt: number }>();

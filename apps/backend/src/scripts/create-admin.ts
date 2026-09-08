@@ -8,8 +8,8 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     const username = (await prompt.question('Логин: ')).trim();
-    const password = await prompt.question('Пароль (минимум 12 символов): ');
-    if (!/^[a-zA-Z0-9_.-]{3,128}$/.test(username) || password.length < 12 || password.length > 128) throw new Error('Некорректный логин или пароль.');
+    const password = await prompt.question('Пароль (минимум 10 символов): ');
+    if (!/^[a-zA-Z0-9_.-]{3,128}$/.test(username) || password.length < 10 || password.length > 128) throw new Error('Некорректный логин или пароль.');
     await prisma.user.create({ data: { username, passwordHash: await argon2.hash(password, { type: argon2.argon2id }), role: Role.ADMIN } });
     console.log('Администратор создан.');
   } finally {
