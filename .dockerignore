@@ -1,0 +1,10 @@
+node_modules
+.next
+dist
+coverage
+.git
+.env
+discord-profile
+uploads
+logs
+backups

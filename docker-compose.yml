@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports: ["127.0.0.1:3001:3001"]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    env_file: .env
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  discord-collector:
+    build:
+      context: .
+      dockerfile: apps/discord-collector/Dockerfile
+    env_file: .env
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+    volumes:
+      - discord-profile:/data/discord-profile
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+
+  collector-auth:
+    build:
+      context: .
+      dockerfile: apps/discord-collector/Dockerfile.auth
+    env_file: .env
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+    volumes:
+      - discord-profile:/data/discord-profile
+    ports: ["127.0.0.1:6080:6080"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+    profiles: [auth]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  discord-profile:

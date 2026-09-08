@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+WORKDIR /app
+COPY package*.json ./
+COPY apps/discord-collector/package.json apps/discord-collector/package.json
+RUN npm install
+COPY apps/discord-collector apps/discord-collector
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    novnc websockify x11vnc xvfb openbox \
+    && rm -rf /var/lib/apt/lists/*
+COPY apps/discord-collector/scripts/auth-novnc.sh /usr/local/bin/auth-novnc
+RUN chmod 755 /usr/local/bin/auth-novnc
+EXPOSE 6080
+CMD ["auth-novnc"]

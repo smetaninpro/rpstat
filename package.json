@@ -1,0 +1,14 @@
+{
+  "name": "rmrp-ufsb-portal",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:generate": "npm run prisma:generate --workspace=@rmrp/backend",
+    "db:migrate": "npm run prisma:migrate --workspace=@rmrp/backend",
+    "admin:create": "npm run admin:create --workspace=@rmrp/backend"
+  },
+  "engines": { "node": ">=22" }
+}

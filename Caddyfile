@@ -1,0 +1,4 @@
+rpstat.top {
+  encode zstd gzip
+  reverse_proxy frontend:3000
+}

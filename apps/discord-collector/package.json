@@ -1,0 +1,7 @@
+{
+  "name": "@rmrp/discord-collector",
+  "private": true,
+  "scripts": { "start": "tsx src/index.ts", "auth": "tsx src/auth.ts", "scan:once": "tsx src/scan-once.ts", "build": "tsc --noEmit", "test": "node --import tsx --test src/readonly-policy.spec.ts src/message-payload.spec.ts" },
+  "dependencies": { "playwright": "^1.49.1" },
+  "devDependencies": { "@types/node": "^22.10.2", "tsx": "^4.19.2", "typescript": "^5.7.2" }
+}

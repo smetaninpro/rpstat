@@ -1,0 +1,365 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  LEADER
+  ADMIN
+}
+enum SourceStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+  AUTH_REQUIRED
+}
+enum ParserMode {
+  SEQUENCE_RANGE
+  TRAINING_MESSAGE
+  NOT_CONFIGURED
+}
+enum CountMode {
+  ATTACHMENTS
+  LINES
+  TRAINING_TEXT
+}
+enum MessageStatus {
+  PARSED
+  UNPARSED
+  UNKNOWN_EMPLOYEE
+  UNKNOWN_POSITION
+  UNKNOWN_DEPARTMENT
+  REVIEW_REQUIRED
+  DUPLICATE
+  SEQUENCE_GAP
+  SEQUENCE_CONFLICT
+  UNKNOWN_TRAINING_TYPE
+  UNKNOWN_TRAINING_RESULT
+  MISSING_MENTIONS
+  OUT_OF_WINDOW
+  ERROR
+}
+enum ActivitySourceType {
+  DISCORD
+  MANUAL
+  IMPORT
+  API
+}
+enum ScanRequestStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id String @id @default(uuid())
+  username String @unique
+  email String? @unique
+  passwordHash String
+  role Role @default(EMPLOYEE)
+  employeeId String? @unique
+  employee Employee? @relation(fields: [employeeId], references: [id])
+  disabledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+}
+
+model Session {
+  id String @id @default(uuid())
+  userId String
+  tokenHash String @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  lastUsedAt DateTime @default(now())
+  userAgent String?
+  revokedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Employee {
+  id String @id @default(uuid())
+  gameName String
+  discordUserId String? @unique
+  discordDisplayName String?
+  rankId String?
+  positionId String?
+  departmentId String?
+  positionRaw String?
+  manualPositionOverride Boolean @default(false)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  rank Rank? @relation(fields: [rankId], references: [id])
+  position Position? @relation(fields: [positionId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  aliases EmployeeAlias[]
+  events ActivityEvent[]
+  users User[]
+  rankHistory EmployeeRankHistory[]
+  positionHistory EmployeePositionHistory[]
+}
+
+model Rank {
+  id String @id @default(uuid())
+  name String @unique
+  shortName String?
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  employees Employee[]
+  history EmployeeRankHistory[]
+}
+
+model EmployeeRankHistory {
+  id String @id @default(uuid())
+  employeeId String
+  rankId String
+  assignedBy String
+  assignedAt DateTime @default(now())
+  removedAt DateTime?
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  rank Rank @relation(fields: [rankId], references: [id])
+}
+
+model EmployeePositionHistory {
+  id String @id @default(uuid())
+  employeeId String
+  positionId String?
+  positionRaw String
+  departmentId String?
+  detectedAt DateTime @default(now())
+  sourceMessageId String?
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  position Position? @relation(fields: [positionId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+}
+
+model Position {
+  id String @id @default(uuid())
+  name String @unique
+  shortName String?
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  employees Employee[]
+  aliases PositionAlias[]
+  history EmployeePositionHistory[]
+}
+
+model PositionAlias {
+  id String @id @default(uuid())
+  positionId String
+  alias String
+  normalizedAlias String @unique
+  position Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+}
+
+model Department {
+  id String @id @default(uuid())
+  code String @unique
+  name String
+  active Boolean @default(true)
+  sortOrder Int @default(0)
+  employees Employee[]
+  history EmployeePositionHistory[]
+}
+
+model EmployeeAlias {
+  id String @id @default(uuid())
+  employeeId String
+  source String
+  alias String
+  normalizedAlias String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  @@unique([source, normalizedAlias])
+}
+
+model ActivityType {
+  id String @id @default(uuid())
+  code String @unique
+  name String
+  singularName String
+  unitLabel String?
+  icon String?
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  events ActivityEvent[]
+  rules DiscordSourceRule[]
+}
+
+model DiscordSource {
+  id String @id @default(uuid())
+  name String
+  channelUrl String @unique
+  guildId String
+  channelId String
+  enabled Boolean @default(true)
+  parserMode ParserMode @default(NOT_CONFIGURED)
+  countMode CountMode @default(ATTACHMENTS)
+  lookbackDays Int?
+  status SourceStatus @default(PAUSED)
+  lastCollectedAt DateTime?
+  lastMessageTimestamp DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  rules DiscordSourceRule[]
+  messages IntegrationMessage[]
+  sequenceItems SourceSequenceItem[]
+  scanRequests ScanRequest[]
+}
+
+model ScanRequest {
+  id String @id @default(uuid())
+  sourceId String?
+  requestedBy String
+  recentDays Int @default(3)
+  limit Int @default(20)
+  status ScanRequestStatus @default(PENDING)
+  startedAt DateTime?
+  completedAt DateTime?
+  result Json?
+  errorMessage String?
+  createdAt DateTime @default(now())
+  source DiscordSource? @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  @@index([status, createdAt])
+}
+
+model DiscordSourceRule {
+  id String @id @default(uuid())
+  sourceId String
+  activityTypeId String?
+  parserKey String
+  priority Int @default(0)
+  enabled Boolean @default(true)
+  parserConfig Json @default("{}")
+  source DiscordSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  activityType ActivityType? @relation(fields: [activityTypeId], references: [id])
+}
+
+model IntegrationMessage {
+  id String @id @default(uuid())
+  sourceId String
+  source String
+  sourceMessageId String?
+  guildId String?
+  channelId String?
+  authorDiscordId String?
+  authorRaw String
+  textRaw String
+  attachments Json @default("[]")
+  messageTimestamp DateTime
+  collectedAt DateTime
+  status MessageStatus
+  employeeId String?
+  parsedFrom Int?
+  parsedTo Int?
+  parsedQuantity Int?
+  fingerprint String @unique
+  parserVersion String @default("1")
+  errorCode String?
+  errorMessage String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  discordSource DiscordSource @relation(fields: [sourceId], references: [id])
+  events ActivityEvent[]
+  sequenceItems SourceSequenceItem[]
+  @@unique([source, sourceMessageId])
+}
+
+model ActivityEvent {
+  id String @id @default(uuid())
+  employeeId String
+  activityTypeId String
+  quantity Int
+  occurredAt DateTime
+  sourceType ActivitySourceType
+  sourceId String?
+  integrationMessageId String?
+  metadata Json @default("{}")
+  createdBy String?
+  createdAt DateTime @default(now())
+  employee Employee @relation(fields: [employeeId], references: [id])
+  activityType ActivityType @relation(fields: [activityTypeId], references: [id])
+  integrationMessage IntegrationMessage? @relation(fields: [integrationMessageId], references: [id])
+}
+
+model TrainingSession {
+  id String @id @default(uuid())
+  sourceId String
+  integrationMessageId String @unique
+  instructorEmployeeId String
+  studentEmployeeId String
+  occurredAt DateTime
+  overallStatus String
+  createdAt DateTime @default(now())
+  items TrainingEventItem[]
+  results TrainingResult[]
+}
+
+model TrainingEventItem {
+  id String @id @default(uuid())
+  trainingSessionId String
+  type String
+  description String
+  status String
+  sortOrder Int
+  session TrainingSession @relation(fields: [trainingSessionId], references: [id], onDelete: Cascade)
+}
+
+model TrainingResult {
+  id String @id @default(uuid())
+  employeeId String
+  trainingSessionId String
+  type String?
+  status String
+  occurredAt DateTime
+  metadata Json @default("{}")
+  createdAt DateTime @default(now())
+  session TrainingSession @relation(fields: [trainingSessionId], references: [id], onDelete: Cascade)
+}
+
+model SourceSequenceItem {
+  id String @id @default(uuid())
+  sourceId String
+  sequenceNumber Int
+  integrationMessageId String
+  employeeId String?
+  activityEventId String?
+  createdAt DateTime @default(now())
+  source DiscordSource @relation(fields: [sourceId], references: [id])
+  message IntegrationMessage @relation(fields: [integrationMessageId], references: [id])
+  @@unique([sourceId, sequenceNumber])
+}
+
+model CollectorInstance {
+  id String @id @default(uuid())
+  name String @unique
+  version String
+  lastHeartbeatAt DateTime
+  status String
+  lastError String?
+}
+
+model CollectorRequest {
+  id String @id @default(uuid())
+  requestId String @unique
+  receivedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+  userId String?
+  action String
+  entityType String
+  entityId String
+  oldValue Json?
+  newValue Json?
+  ip String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}

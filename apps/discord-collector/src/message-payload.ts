@@ -1,0 +1,2 @@
+export type Mention = { displayName: string };
+export function cleanMentions(values: string[]) { const seen = new Set<string>(); return values.map((value) => value.replace(/^@/, '').trim()).filter((value) => value.length > 0 && value.length <= 256).filter((value) => { const key = value.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; }).map((displayName): Mention => ({ displayName })); }
