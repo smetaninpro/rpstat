@@ -32,11 +32,11 @@ export class DiscordWebAdapter {
       .waitFor({ state: "attached", timeout: 30000 })
       .then(() => true)
       .catch(() => false);
-    const hasAuthScreen = await page
-      .locator(
-        'input[name="email"], input[name="password"], text=/captcha|verify|подтверд|войдите/i',
-      )
-      .count();
+    const hasAuthScreen =
+      (await page
+        .locator('input[name="email"], input[name="password"]')
+        .count()) +
+      (await page.getByText(/captcha|verify|подтверд|войдите/i).count());
     if (hasAuthScreen || page.url().includes("/login"))
       throw new Error("AUTH_REQUIRED");
     if (!rendered)
