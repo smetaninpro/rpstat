@@ -676,7 +676,7 @@ export default function Home() {
       <main className="login-page">
         <section className="login-brand">
           <div className="crest">У</div>
-          <p>RMRP / ПОРТАЛ</p>
+          <p>ВНУТРЕННИЙ ПОРТАЛ</p>
           <h1>
             Контур
             <br />
@@ -721,7 +721,7 @@ export default function Home() {
         <div className="brand">
           <div className="crest">У</div>
           <div>
-              <b>RMRP | ПОРТАЛ</b>
+              <b>ВНУТРЕННИЙ ПОРТАЛ</b>
             <span>Управление</span>
           </div>
         </div>
@@ -1119,7 +1119,7 @@ function PageHeader({
   return (
     <section className="page-header">
       <div>
-        <p className="eyebrow">RMRP / ВНУТРЕННИЙ ПОРТАЛ</p>
+        <p className="eyebrow">ВНУТРЕННИЙ ПОРТАЛ</p>
         <h1>{title}</h1>
         <span>{subtitle}</span>
       </div>
