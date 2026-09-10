@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -120,7 +120,19 @@ type Material = {
   departmentId: string | null;
   active: boolean;
   department: { id: string; name: string; code: string } | null;
+  attachments?: {
+    id: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    url: string;
+  }[];
 };
+function formatBytes(sizeBytes: number) {
+  if (sizeBytes < 1024) return `${sizeBytes} Б`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} КБ`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} МБ`;
+}
 type ActivityDetail = {
   id: string;
   employeeId: string;
@@ -634,7 +646,8 @@ export default function Home() {
     setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
   }
   async function saveMaterial(id: string | null, values: Record<string, unknown>) {
-    const response = await fetch(`${api}/api/admin/materials${id ? `/${id}` : ""}`, {
+    const materialEndpoint = isAdmin ? "/api/admin/materials" : "/api/materials";
+    const response = await fetch(`${api}${materialEndpoint}${id ? `/${id}` : ""}`, {
       method: id ? "PATCH" : "POST",
       credentials: "include",
       headers: { "content-type": "application/json", "x-csrf-token": csrf() },
@@ -809,7 +822,7 @@ export default function Home() {
               scanRequests,
               unresolved,
               activityDetails,
-              isAdmin,
+               role: user?.role ?? "EMPLOYEE",
               saveMaterial,
             })
           )}
@@ -848,7 +861,7 @@ function renderView(props: {
   scanNote: string;
   scanRequests: ScanRequest[];
   activityDetails: ActivityDetail[];
-  isAdmin: boolean;
+  role: User["role"];
   materials: Material[];
   saveMaterial: (id: string | null, values: Record<string, unknown>) => Promise<void>;
   unresolved: {
@@ -908,18 +921,53 @@ function renderView(props: {
 function MaterialsView({
   materials,
   dictionary,
-  isAdmin,
+  loading,
+  role,
   saveMaterial,
 }: {
   materials: Material[];
   dictionary: Dictionary | null;
-  isAdmin: boolean;
+  loading: boolean;
+  role: User["role"];
   saveMaterial: (id: string | null, values: Record<string, unknown>) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<Material | null>(null);
   const [creating, setCreating] = useState(false);
+  const [reading, setReading] = useState<Material | null>(null);
+  const [newAttachments, setNewAttachments] = useState<{ fileName: string; mimeType: string; dataBase64: string }[]>([]);
   const [formError, setFormError] = useState("");
+  const isAdmin = role === "ADMIN";
+  const canEdit = role !== "EMPLOYEE";
   const shown = isAdmin ? materials : materials.filter((material) => material.active);
+  const safeHref = (value: string | null | undefined) => {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
+  async function addAttachments(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    try {
+      const attachments = await Promise.all(files.map(async (file) => {
+        const dataBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+          reader.onerror = () => reject(new Error(`Не удалось прочитать файл «${file.name}».`));
+          reader.readAsDataURL(file);
+        });
+        return { fileName: file.name, mimeType: file.type || "application/octet-stream", dataBase64 };
+      }));
+      setNewAttachments((current) => [...current, ...attachments]);
+      setFormError("");
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "Не удалось добавить вложение.");
+    } finally {
+      event.target.value = "";
+    }
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -931,34 +979,62 @@ function MaterialsView({
     }
     setFormError("");
     try {
-      await saveMaterial(editing?.id ?? null, {
+      const values: Record<string, unknown> = {
         title: String(form.get("title") ?? ""),
         body: String(form.get("body") ?? ""),
         linkUrl: String(form.get("linkUrl") ?? "") || null,
         isPublic,
         departmentId,
         active: editing?.active ?? true,
-      });
+      };
+      if (newAttachments.length) values.attachments = newAttachments;
+      await saveMaterial(editing?.id ?? null, values);
       setEditing(null);
       setCreating(false);
+      setNewAttachments([]);
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : "Не удалось сохранить материал.");
     }
+  }
+  if (reading) {
+    const linkHref = safeHref(reading.linkUrl);
+    return (
+      <article className="material-reader">
+        <button className="link-button reader-back" onClick={() => setReading(null)}>← Все материалы</button>
+        <header className="reader-header">
+          <div className="material-meta"><Badge tone={reading.isPublic ? "good" : "warn"}>{reading.isPublic ? "Общий доступ" : reading.department?.code ?? "Подразделение"}</Badge>{!reading.active && <Badge tone="danger">Архив</Badge>}</div>
+          <h1>{reading.title}</h1>
+          {reading.department && <p>Материал подразделения {reading.department.code} · {reading.department.name}</p>}
+        </header>
+        <div className="reader-body">{reading.body}</div>
+        {(linkHref || reading.attachments?.length) && <section className="reader-resources">
+          <h2>Материалы и вложения</h2>
+          {linkHref && <a className="discord-link" href={linkHref} target="_blank" rel="noopener noreferrer">Открыть внешнюю ссылку ↗</a>}
+          {reading.attachments?.map((attachment) => {
+            const href = safeHref(attachment.url);
+            return href ? <a className="attachment-card" key={attachment.id} href={href} target="_blank" rel="noopener noreferrer"><span>ФАЙЛ</span><b>{attachment.fileName}</b><small>{attachment.mimeType} · {formatBytes(attachment.sizeBytes)}</small></a> : <div className="attachment-card unavailable" key={attachment.id}><span>ФАЙЛ</span><b>{attachment.fileName}</b><small>Ссылка на файл недоступна</small></div>;
+          })}
+        </section>}
+        {canEdit && <div className="reader-actions"><button className="button secondary" onClick={() => { setEditing(reading); setCreating(false); setNewAttachments([]); setFormError(""); setReading(null); }}>Изменить материал</button></div>}
+      </article>
+    );
   }
   return (
     <>
       <PageHeader
         title="Материалы"
         subtitle="Справочные и методические материалы"
-        action={isAdmin ? <button className="button" onClick={() => { setEditing(null); setCreating(true); setFormError(""); }}>Добавить материал</button> : undefined}
+         action={isAdmin ? <button className="button" onClick={() => { setEditing(null); setCreating(true); setNewAttachments([]); setFormError(""); }}>Добавить материал</button> : undefined}
       />
-      {isAdmin && (creating || editing) && (
+       {canEdit && (creating || editing) && (
         <section className="panel form-panel">
           <PanelTitle eyebrow="РЕДАКТИРОВАНИЕ" title={editing ? "Изменить материал" : "Новый материал"} />
           <form className="editor material-form" onSubmit={submit}>
             <label>Название<input name="title" required minLength={3} maxLength={160} defaultValue={editing?.title ?? ""} /></label>
             <label>Содержание<textarea name="body" required maxLength={10000} defaultValue={editing?.body ?? ""} /></label>
-            <label>HTTPS-ссылка (необязательно)<input name="linkUrl" type="url" placeholder="https://..." defaultValue={editing?.linkUrl ?? ""} /></label>
+             <label>HTTPS-ссылка (необязательно)<input name="linkUrl" type="url" placeholder="https://..." defaultValue={editing?.linkUrl ?? ""} /></label>
+             <label>Вложения<input type="file" multiple onChange={(event) => void addAttachments(event)} /></label>
+             {(editing?.attachments?.length || newAttachments.length) ? <div className="attachment-list">{editing?.attachments?.map((attachment) => <span key={attachment.id}>{attachment.fileName}</span>)}{newAttachments.map((attachment, index) => <span key={`${attachment.fileName}-${index}`}>{attachment.fileName}<button type="button" aria-label={`Удалить ${attachment.fileName}`} onClick={() => setNewAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div> : <p className="muted">Можно выбрать один или несколько файлов.</p>}
             <label>Доступ<select name="isPublic" defaultValue={String(editing?.isPublic ?? true)}><option value="true">Общий доступ</option><option value="false">Только подразделение</option></select></label>
             <label>Подразделение<select name="departmentId" defaultValue={editing?.departmentId ?? ""}><option value="">Не выбрано</option>{dictionary?.departments.filter((department) => department.active).map((department) => <option key={department.id} value={department.id}>{department.code} - {department.name}</option>)}</select></label>
             {formError && <p className="form-error">{formError}</p>}
@@ -966,15 +1042,17 @@ function MaterialsView({
           </form>
         </section>
       )}
-      {shown.length === 0 ? <section className="panel"><EmptyState title="Материалов пока нет" text="Доступные справочные и методические материалы появятся здесь." /></section> : (
+       {loading ? <section className="panel"><StateCard /></section> : shown.length === 0 ? <section className="panel"><EmptyState title="Материалов пока нет" text="Доступные справочные и методические материалы появятся здесь." /></section> : (
         <section className="materials-grid">
           {shown.map((material) => (
             <article className={material.active ? "material-card" : "material-card archived"} key={material.id}>
               <div className="material-meta"><Badge tone={material.isPublic ? "good" : "warn"}>{material.isPublic ? "Общий доступ" : material.department?.code ?? "Подразделение"}</Badge>{!material.active && <Badge tone="danger">Архив</Badge>}</div>
-              <h2>{material.title}</h2><p>{material.body}</p>
-              <div className="material-actions">
-                {material.linkUrl && <a className="discord-link" href={material.linkUrl} target="_blank" rel="noopener noreferrer">Открыть ссылку ↗</a>}
-                {isAdmin && <><button className="link-button" onClick={() => { setCreating(false); setEditing(material); setFormError(""); }}>Изменить</button><button className="link-button" onClick={() => void saveMaterial(material.id, { title: material.title, body: material.body, linkUrl: material.linkUrl, isPublic: material.isPublic, departmentId: material.departmentId, active: !material.active })}>{material.active ? "Архивировать" : "Восстановить"}</button></>}
+               <button className="material-open" onClick={() => setReading(material)}><h2>{material.title}</h2><p>{material.body}</p></button>
+               {material.attachments?.length ? <div className="attachment-summary">Вложений: {material.attachments.length}</div> : null}
+               <div className="material-actions">
+                 <button className="link-button" onClick={() => setReading(material)}>Читать</button>
+                 {canEdit && <button className="link-button" onClick={() => { setCreating(false); setEditing(material); setNewAttachments([]); setFormError(""); }}>Изменить</button>}
+                 {isAdmin && <button className="link-button" onClick={() => void saveMaterial(material.id, { title: material.title, body: material.body, linkUrl: material.linkUrl, isPublic: material.isPublic, departmentId: material.departmentId, active: !material.active })}>{material.active ? "Архивировать" : "Восстановить"}</button>}
               </div>
             </article>
           ))}

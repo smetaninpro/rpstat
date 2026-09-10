@@ -181,7 +181,20 @@ model Material {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   department Department? @relation(fields: [departmentId], references: [id])
+  attachments MaterialAttachment[]
   @@index([active, isPublic, departmentId, createdAt])
+}
+
+model MaterialAttachment {
+  id String @id @default(uuid())
+  materialId String
+  fileName String
+  mimeType String
+  sizeBytes Int
+  storageKey String @unique
+  createdAt DateTime @default(now())
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  @@index([materialId])
 }
 
 model EmployeeAlias {

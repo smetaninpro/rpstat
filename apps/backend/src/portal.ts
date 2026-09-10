@@ -9,8 +9,13 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import { Response } from "express";
+import { createHash, randomUUID } from "crypto";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { join } from "path";
 import { Type } from "class-transformer";
 import {
   IsBoolean,
@@ -50,6 +55,7 @@ class MaterialDto {
   @IsBoolean() isPublic!: boolean;
   @IsOptional() @IsString() departmentId?: string | null;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() attachments?: { fileName: string; mimeType: string; dataBase64: string }[];
 }
 class PaginationDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) take = 25;
@@ -99,6 +105,7 @@ class CreateScanRequestDto {
 
 @Injectable()
 export class PortalService {
+  private readonly materialFilesPath = process.env.MATERIAL_FILES_PATH ?? "/data/material-files";
   constructor(private readonly prisma: PrismaService) {}
   async dashboard(user: { role: Role; employeeId: string | null }) {
     const scope = await this.employeeWhere(user);
@@ -215,15 +222,17 @@ export class PortalService {
     const departmentId = await this.departmentScope(user);
     return departmentId ? { OR: [{ isPublic: true }, { departmentId }] } : { isPublic: true };
   }
+  private materialInclude() { return { department: { select: { id: true, name: true, code: true } }, attachments: { select: { id: true, fileName: true, mimeType: true, sizeBytes: true } } }; }
+  private withAttachmentUrls<T extends { attachments: { id: string }[] }>(material: T) { return { ...material, attachments: material.attachments.map((attachment) => ({ ...attachment, url: `/api/materials/attachments/${attachment.id}` })) }; }
   async materials(user: { role: Role; employeeId: string | null }) {
     return this.prisma.material.findMany({
       where: { active: true, ...(await this.materialWhere(user)) },
-      include: { department: { select: { id: true, name: true, code: true } } },
+      include: this.materialInclude(),
       orderBy: { createdAt: "desc" },
-    });
+    }).then((materials) => materials.map((material) => this.withAttachmentUrls(material)));
   }
   async adminMaterials() {
-    return this.prisma.material.findMany({ include: { department: { select: { id: true, name: true, code: true } } }, orderBy: { createdAt: "desc" } });
+    return this.prisma.material.findMany({ include: this.materialInclude(), orderBy: { createdAt: "desc" } }).then((materials) => materials.map((material) => this.withAttachmentUrls(material)));
   }
   private async validateMaterial(dto: MaterialDto) {
     if (!dto.isPublic && !dto.departmentId) throw new BadRequestException("Укажите подразделение или включите общий доступ");
@@ -233,20 +242,54 @@ export class PortalService {
       if (url.protocol !== "https:") throw new BadRequestException("Разрешены только HTTPS-ссылки");
     }
     if (dto.departmentId && !(await this.prisma.department.findFirst({ where: { id: dto.departmentId, active: true } }))) throw new BadRequestException("Подразделение не найдено или архивировано");
+    if (dto.attachments) {
+      if (dto.attachments.length > 5) throw new BadRequestException("Можно прикрепить не более 5 файлов");
+      for (const attachment of dto.attachments) {
+        if (!attachment || !/^[^\\/:*?\"<>|]{1,180}$/.test(attachment.fileName) || !/^(application\/pdf|image\/(png|jpeg|webp)|text\/plain)$/.test(attachment.mimeType)) throw new BadRequestException("Недопустимый формат вложения");
+        const bytes = Buffer.from(attachment.dataBase64, "base64");
+        if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new BadRequestException("Размер каждого файла должен быть от 1 Б до 5 МБ");
+      }
+    }
+  }
+  private async saveAttachments(materialId: string, attachments: MaterialDto["attachments"]) {
+    if (!attachments?.length) return;
+    await mkdir(this.materialFilesPath, { recursive: true });
+    for (const attachment of attachments) {
+      const storageKey = `${randomUUID()}-${createHash("sha256").update(attachment.fileName).digest("hex").slice(0, 12)}`;
+      const bytes = Buffer.from(attachment.dataBase64, "base64");
+      await writeFile(join(this.materialFilesPath, storageKey), bytes, { flag: "wx" });
+      await this.prisma.materialAttachment.create({ data: { materialId, fileName: attachment.fileName, mimeType: attachment.mimeType, sizeBytes: bytes.length, storageKey } });
+    }
   }
   async createMaterial(dto: MaterialDto, userId: string) {
     await this.validateMaterial(dto);
-    const material = await this.prisma.material.create({ data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null }, include: { department: true } });
+    const material = await this.prisma.material.create({ data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null }, include: this.materialInclude() });
+    await this.saveAttachments(material.id, dto.attachments);
     await this.prisma.auditLog.create({ data: { userId, action: "MATERIAL_CREATED", entityType: "Material", entityId: material.id, newValue: { title: material.title, isPublic: material.isPublic, departmentId: material.departmentId } } });
-    return material;
+    return this.withAttachmentUrls(await this.prisma.material.findUniqueOrThrow({ where: { id: material.id }, include: this.materialInclude() }));
   }
   async updateMaterial(id: string, dto: MaterialDto, userId: string) {
     await this.validateMaterial(dto);
     const existing = await this.prisma.material.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Материал не найден");
-    const material = await this.prisma.material.update({ where: { id }, data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null, active: dto.active ?? existing.active }, include: { department: true } });
+    const material = await this.prisma.material.update({ where: { id }, data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null, active: dto.active ?? existing.active }, include: this.materialInclude() });
+    await this.saveAttachments(material.id, dto.attachments);
     await this.prisma.auditLog.create({ data: { userId, action: material.active ? "MATERIAL_UPDATED" : "MATERIAL_ARCHIVED", entityType: "Material", entityId: id, oldValue: { title: existing.title, active: existing.active }, newValue: { title: material.title, active: material.active } } });
-    return material;
+    return this.withAttachmentUrls(await this.prisma.material.findUniqueOrThrow({ where: { id }, include: this.materialInclude() }));
+  }
+  async updateLeaderMaterial(id: string, dto: MaterialDto, user: { id: string; role: Role; employeeId: string | null }) {
+    const scope = await this.materialWhere(user);
+    const material = await this.prisma.material.findFirst({ where: { id, ...scope } });
+    if (!material) throw new NotFoundException("Материал не найден");
+    if (dto.isPublic !== material.isPublic || dto.departmentId !== material.departmentId || dto.active !== undefined) throw new BadRequestException("Руководитель может менять только содержание и вложения доступного материала");
+    return this.updateMaterial(id, { ...dto, isPublic: material.isPublic, departmentId: material.departmentId, active: material.active }, user.id);
+  }
+  async attachment(id: string, user: { role: Role; employeeId: string | null }) {
+    const attachment = await this.prisma.materialAttachment.findUnique({ where: { id }, include: { material: true } });
+    if (!attachment || !attachment.material.active) throw new NotFoundException("Вложение не найдено");
+    const scope = await this.materialWhere(user);
+    if (user.role !== Role.ADMIN && !(attachment.material.isPublic || ("OR" in scope && (scope as any).OR.some((entry: any) => entry.departmentId === attachment.material.departmentId)))) throw new NotFoundException("Вложение не найдено");
+    return { attachment, bytes: await readFile(join(this.materialFilesPath, attachment.storageKey)) };
   }
   async activityDetails(
     period: "week" | "month",
@@ -1120,6 +1163,8 @@ export class PortalController {
   @Get("admin/materials") @Roles(Role.ADMIN) adminMaterials() { return this.portal.adminMaterials(); }
   @Post("admin/materials") @Roles(Role.ADMIN) createMaterial(@Body() dto: MaterialDto, @CurrentUser() user: { id: string }) { return this.portal.createMaterial(dto, user.id); }
   @Patch("admin/materials/:id") @Roles(Role.ADMIN) updateMaterial(@Param("id") id: string, @Body() dto: MaterialDto, @CurrentUser() user: { id: string }) { return this.portal.updateMaterial(id, dto, user.id); }
+  @Patch("materials/:id") @Roles(Role.LEADER) updateLeaderMaterial(@Param("id") id: string, @Body() dto: MaterialDto, @CurrentUser() user: { id: string; role: Role; employeeId: string | null }) { return this.portal.updateLeaderMaterial(id, dto, user); }
+  @Get("materials/attachments/:id") @Roles(Role.EMPLOYEE, Role.LEADER, Role.ADMIN) async attachment(@Param("id") id: string, @CurrentUser() user: { role: Role; employeeId: string | null }, @Res() response: Response) { const { attachment, bytes } = await this.portal.attachment(id, user); response.setHeader("Content-Type", attachment.mimeType); response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`); response.setHeader("X-Content-Type-Options", "nosniff"); response.send(bytes); }
   @Get("leadership/analytics")
   @Roles(Role.LEADER, Role.ADMIN)
   leadershipAnalytics(
