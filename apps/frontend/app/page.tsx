@@ -467,7 +467,7 @@ export default function Home() {
       if (next === "dictionaries")
         setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
       if (next === "users") {
-        const [usersValue, employeeValue] = await Promise.all([fetchJson<ManagedUser[]>("/api/admin/users"), fetchJson<{ items: Employee[] }>("/api/employees?take=200")]);
+        const [usersValue, employeeValue] = await Promise.all([fetchJson<ManagedUser[]>("/api/admin/users"), fetchJson<{ items: Employee[] }>("/api/employees?take=100")]);
         setManagedUsers(usersValue);
         setEmployees(employeeValue.items);
       }
