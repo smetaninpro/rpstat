@@ -948,6 +948,10 @@ function MaterialsView({
       return null;
     }
   };
+  function applyFormat(command: string, value?: string) {
+    document.execCommand(command, false, value);
+    document.querySelector<HTMLElement>("[data-material-editor]")?.focus();
+  }
   async function addAttachments(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     try {
@@ -981,7 +985,7 @@ function MaterialsView({
     try {
       const values: Record<string, unknown> = {
         title: String(form.get("title") ?? ""),
-        body: String(form.get("body") ?? ""),
+        body: (event.currentTarget.querySelector<HTMLElement>("[data-material-editor]")?.innerHTML ?? "").trim(),
         linkUrl: String(form.get("linkUrl") ?? "") || null,
         isPublic,
         departmentId,
@@ -1006,7 +1010,7 @@ function MaterialsView({
           <h1>{reading.title}</h1>
           {reading.department && <p>Материал подразделения {reading.department.code} · {reading.department.name}</p>}
         </header>
-        <div className="reader-body">{reading.body}</div>
+        <div className="reader-body" dangerouslySetInnerHTML={{ __html: reading.body }} />
         {(linkHref || reading.attachments?.length) && <section className="reader-resources">
           <h2>Материалы и вложения</h2>
           {linkHref && <a className="discord-link" href={linkHref} target="_blank" rel="noopener noreferrer">Открыть внешнюю ссылку ↗</a>}
@@ -1031,7 +1035,7 @@ function MaterialsView({
           <PanelTitle eyebrow="РЕДАКТИРОВАНИЕ" title={editing ? "Изменить материал" : "Новый материал"} />
           <form className="editor material-form" onSubmit={submit}>
             <label>Название<input name="title" required minLength={3} maxLength={160} defaultValue={editing?.title ?? ""} /></label>
-            <label>Содержание<textarea name="body" required maxLength={10000} defaultValue={editing?.body ?? ""} /></label>
+            <div className="material-editor-field"><span>Содержание</span><div className="wysiwyg-toolbar" role="toolbar" aria-label="Форматирование текста"><button type="button" title="Полужирный" onClick={() => applyFormat("bold")}><b>B</b></button><button type="button" title="Курсив" onClick={() => applyFormat("italic")}><i>I</i></button><button type="button" title="Подчеркнутый" onClick={() => applyFormat("underline")}><u>U</u></button><button type="button" title="Заголовок" onClick={() => applyFormat("formatBlock", "h2")}>H2</button><button type="button" title="Маркированный список" onClick={() => applyFormat("insertUnorderedList")}>• Список</button><button type="button" title="Нумерованный список" onClick={() => applyFormat("insertOrderedList")}>1. Список</button><button type="button" title="Цитата" onClick={() => applyFormat("formatBlock", "blockquote")}>❝</button><button type="button" title="Добавить HTTPS-ссылку" onClick={() => { const url = window.prompt("HTTPS-ссылка"); if (url?.startsWith("https://")) applyFormat("createLink", url); }}>Ссылка</button></div><div className="wysiwyg-editor" data-material-editor contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Содержание" data-placeholder="Введите текст материала..." dangerouslySetInnerHTML={{ __html: editing?.body ?? "" }} /></div>
              <label>HTTPS-ссылка (необязательно)<input name="linkUrl" type="url" placeholder="https://..." defaultValue={editing?.linkUrl ?? ""} /></label>
              <label>Вложения<input type="file" multiple onChange={(event) => void addAttachments(event)} /></label>
              {(editing?.attachments?.length || newAttachments.length) ? <div className="attachment-list">{editing?.attachments?.map((attachment) => <span key={attachment.id}>{attachment.fileName}</span>)}{newAttachments.map((attachment, index) => <span key={`${attachment.fileName}-${index}`}>{attachment.fileName}<button type="button" aria-label={`Удалить ${attachment.fileName}`} onClick={() => setNewAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div> : <p className="muted">Можно выбрать один или несколько файлов.</p>}

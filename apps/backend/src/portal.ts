@@ -33,6 +33,24 @@ import { CurrentUser, RoleGuard, Roles, SessionGuard } from "./auth";
 import { PrismaService } from "./prisma.service";
 import { parseDiscordNickname } from "./discord-nickname";
 
+const allowedMaterialTags = new Set(["P", "BR", "STRONG", "EM", "U", "S", "H2", "H3", "UL", "OL", "LI", "BLOCKQUOTE", "A"]);
+function sanitizeMaterialHtml(value: string) {
+  const withoutDangerous = value
+    .replace(/<\/?(?:script|style|iframe|object|embed|form)[^>]*>/gi, "")
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  return withoutDangerous.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (tag, name: string, attributes: string) => {
+    const element = name.toUpperCase();
+    if (!allowedMaterialTags.has(element)) return "";
+    if (tag.startsWith("</")) return `</${element.toLowerCase()}>`;
+    if (element !== "A") return `<${element.toLowerCase()}>`;
+    const href = attributes.match(/\shref\s*=\s*["']([^"']+)["']/i)?.[1];
+    try {
+      const url = href ? new URL(href) : null;
+      return url?.protocol === "https:" ? `<a href="${url.href}" target="_blank" rel="noopener noreferrer">` : "<a>";
+    } catch { return "<a>"; }
+  });
+}
+
 class CreateEmployeeDto {
   @IsString() @Length(1, 120) gameName!: string;
   @IsOptional() @IsString() @Length(1, 64) discordUserId?: string;
@@ -263,7 +281,7 @@ export class PortalService {
   }
   async createMaterial(dto: MaterialDto, userId: string) {
     await this.validateMaterial(dto);
-    const material = await this.prisma.material.create({ data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null }, include: this.materialInclude() });
+    const material = await this.prisma.material.create({ data: { title: dto.title.trim(), body: sanitizeMaterialHtml(dto.body.trim()), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null }, include: this.materialInclude() });
     await this.saveAttachments(material.id, dto.attachments);
     await this.prisma.auditLog.create({ data: { userId, action: "MATERIAL_CREATED", entityType: "Material", entityId: material.id, newValue: { title: material.title, isPublic: material.isPublic, departmentId: material.departmentId } } });
     return this.withAttachmentUrls(await this.prisma.material.findUniqueOrThrow({ where: { id: material.id }, include: this.materialInclude() }));
@@ -272,7 +290,7 @@ export class PortalService {
     await this.validateMaterial(dto);
     const existing = await this.prisma.material.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Материал не найден");
-    const material = await this.prisma.material.update({ where: { id }, data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null, active: dto.active ?? existing.active }, include: this.materialInclude() });
+    const material = await this.prisma.material.update({ where: { id }, data: { title: dto.title.trim(), body: sanitizeMaterialHtml(dto.body.trim()), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null, active: dto.active ?? existing.active }, include: this.materialInclude() });
     await this.saveAttachments(material.id, dto.attachments);
     await this.prisma.auditLog.create({ data: { userId, action: material.active ? "MATERIAL_UPDATED" : "MATERIAL_ARCHIVED", entityType: "Material", entityId: id, oldValue: { title: existing.title, active: existing.active }, newValue: { title: material.title, active: material.active } } });
     return this.withAttachmentUrls(await this.prisma.material.findUniqueOrThrow({ where: { id }, include: this.materialInclude() }));
