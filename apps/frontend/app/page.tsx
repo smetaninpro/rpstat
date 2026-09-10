@@ -45,6 +45,7 @@ type View =
   | "audit"
   | "settings"
   | "unresolved";
+type User = { id: string; username: string; role: "ADMIN" | "LEADER" | "EMPLOYEE"; employeeId: string | null };
 type Activity = {
   id: string;
   code: string;
@@ -112,6 +113,7 @@ type EmployeeFilters = {
 type DictionaryKind = "departments" | "positions" | "ranks";
 type ActivityDetail = {
   id: string;
+  employeeId: string;
   occurredAt: string;
   quantity: number;
   employee: { gameName: string; department?: { code: string } | null };
@@ -186,23 +188,21 @@ const icon = (name: string) => (
     {name}
   </span>
 );
-const nav: { view: View; label: string; glyph: string; admin?: boolean }[] = [
-  { view: "dashboard", label: "Главная", glyph: "⌂" },
-  { view: "employees", label: "Сотрудники", glyph: "◉" },
-  { view: "statistics", label: "Общий отчет", glyph: "↗" },
-  { view: "statistics-employees", label: "Отчет: сотрудники", glyph: "▥" },
-  { view: "statistics-departments", label: "Отчет: подразделения", glyph: "▦" },
-  { view: "statistics-activity", label: "Отчет: активность", glyph: "◈" },
-  { view: "statistics-sources", label: "Источники отчета", glyph: "⌁" },
-  { view: "training", label: "Обучение", glyph: "▣" },
-  { view: "materials", label: "Материалы", glyph: "▤" },
-  { view: "integrations", label: "Интеграции", glyph: "⌁", admin: true },
-  { view: "review", label: "Проверка данных", glyph: "!", admin: true },
-  { view: "unresolved", label: "Неразобрано", glyph: "?", admin: true },
-  { view: "dictionaries", label: "Справочники", glyph: "◇", admin: true },
-  { view: "users", label: "Пользователи", glyph: "◌", admin: true },
-  { view: "audit", label: "Аудит", glyph: "≡", admin: true },
-  { view: "settings", label: "Настройки", glyph: "⚙", admin: true },
+const nav: { view: View; label: string; glyph: string; roles: User["role"][] }[] = [
+  { view: "dashboard", label: "Главная", glyph: "⌂", roles: ["ADMIN", "LEADER"] },
+  { view: "employees", label: "Сотрудники", glyph: "◉", roles: ["ADMIN", "LEADER"] },
+  { view: "statistics", label: "Общий отчет", glyph: "↗", roles: ["ADMIN", "LEADER"] },
+  { view: "statistics-employees", label: "Отчет: сотрудники", glyph: "▥", roles: ["ADMIN", "LEADER"] },
+  { view: "statistics-departments", label: "Отчет: подразделения", glyph: "▦", roles: ["ADMIN", "LEADER"] },
+  { view: "statistics-activity", label: "Отчет: активность", glyph: "◈", roles: ["ADMIN", "LEADER"] },
+  { view: "statistics-sources", label: "Источники отчета", glyph: "⌁", roles: ["ADMIN", "LEADER"] },
+  { view: "integrations", label: "Интеграции", glyph: "⌁", roles: ["ADMIN"] },
+  { view: "review", label: "Проверка данных", glyph: "!", roles: ["ADMIN"] },
+  { view: "unresolved", label: "Неразобрано", glyph: "?", roles: ["ADMIN"] },
+  { view: "dictionaries", label: "Справочники", glyph: "◇", roles: ["ADMIN"] },
+  { view: "users", label: "Пользователи", glyph: "◌", roles: ["ADMIN"] },
+  { view: "audit", label: "Аудит", glyph: "≡", roles: ["ADMIN"] },
+  { view: "settings", label: "Настройки", glyph: "⚙", roles: ["ADMIN"] },
 ];
 
 function EmptyState({
@@ -297,12 +297,12 @@ export default function Home() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<View>(
     nav.some((item) => item.view === initialView) ? initialView : "dashboard",
   );
   const [period, setPeriod] = useState<"week" | "month">("week");
   const [menu, setMenu] = useState(false);
-  const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(
     null,
@@ -348,10 +348,19 @@ export default function Home() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json() as Promise<T>;
   };
+  const allowedViews = (role: User["role"]) => nav.filter((item) => item.roles.includes(role));
   async function loadDashboard(next = period) {
     setLoading(true);
     setError("");
     try {
+      const currentUser = (await fetchJson<{ user: User }>("/api/auth/me")).user;
+      setUser(currentUser);
+      if (currentUser.role === "EMPLOYEE") {
+        if (!currentUser.employeeId) throw new Error("PROFILE_NOT_LINKED");
+        setSelectedEmployee(await fetchJson<Employee>("/api/my-profile"));
+        setAuthenticated(true);
+        return;
+      }
       const [summary, report, details] = await Promise.all([
         fetchJson<Dashboard>("/api/dashboard"),
         fetchJson<Analytics>(`/api/leadership/analytics?period=${next}`),
@@ -361,8 +370,10 @@ export default function Home() {
       setAnalytics(report);
       setActivityDetails(details);
       setAuthenticated(true);
-    } catch {
+    } catch (reason) {
       setAuthenticated(false);
+      if (reason instanceof Error && reason.message === "PROFILE_NOT_LINKED")
+        setError("Учетная запись не связана с карточкой сотрудника.");
     } finally {
       setLoading(false);
     }
@@ -453,8 +464,11 @@ export default function Home() {
     if (authenticated) void loadDashboard(period);
   }, [period]);
   useEffect(() => {
-    if (authenticated) void loadView(view);
-  }, [view, authenticated]);
+    if (authenticated && user?.role !== "EMPLOYEE") void loadView(view);
+  }, [view, authenticated, user]);
+  useEffect(() => {
+    if (user && user.role !== "EMPLOYEE" && !allowedViews(user.role).some((item) => item.view === view)) go("dashboard");
+  }, [user, view]);
   async function login(event: FormEvent) {
     event.preventDefault();
     setError("");
@@ -468,6 +482,8 @@ export default function Home() {
       setError("Неверные учетные данные.");
       return;
     }
+    const result = (await response.json()) as { user: User };
+    setUser(result.user);
     await loadDashboard();
   }
   async function logout() {
@@ -477,6 +493,7 @@ export default function Home() {
       headers: { "x-csrf-token": csrf() },
     });
     setAuthenticated(false);
+    setUser(null);
     setDashboard(null);
     setAnalytics(null);
     setEmployees([]);
@@ -485,6 +502,7 @@ export default function Home() {
     setSelectedEmployee(null);
   }
   function go(next: View) {
+    if (!user || !allowedViews(user.role).some((item) => item.view === next)) return;
     window.history.pushState({}, "", `/?section=${next}`);
     setView(next);
     setSelectedEmployee(null);
@@ -634,6 +652,8 @@ export default function Home() {
         </form>
       </main>
     );
+  const visibleNav = user ? allowedViews(user.role) : [];
+  const isAdmin = user?.role === "ADMIN";
   return (
     <div className="app">
       <aside className={menu ? "sidebar open" : "sidebar"}>
@@ -645,8 +665,8 @@ export default function Home() {
           </div>
         </div>
         <nav>
-          {nav
-            .filter((item) => !item.admin)
+          {visibleNav
+            .filter((item) => item.roles.length > 1)
             .map((item) => (
               <button
                 key={item.view}
@@ -657,9 +677,9 @@ export default function Home() {
                 {item.label}
               </button>
             ))}
-          <p>АДМИНИСТРИРОВАНИЕ</p>
-          {nav
-            .filter((item) => item.admin)
+          {isAdmin && <p>АДМИНИСТРИРОВАНИЕ</p>}
+          {visibleNav
+            .filter((item) => item.roles.length === 1)
             .map((item) => (
               <button
                 key={item.view}
@@ -671,15 +691,11 @@ export default function Home() {
               </button>
             ))}
         </nav>
-        <div className="sidebar-foot">
-          <Badge
-            tone={dashboard?.collector.status === "ONLINE" ? "good" : "warn"}
-          >
-            {dashboard?.collector.status === "ONLINE"
-              ? "Collector online"
-              : "Collector inactive"}
+        {user?.role !== "EMPLOYEE" && <div className="sidebar-foot">
+          <Badge tone={dashboard?.collector.status === "ONLINE" ? "good" : "warn"}>
+            {dashboard?.collector.status === "ONLINE" ? "Collector online" : "Collector inactive"}
           </Badge>
-        </div>
+        </div>}
       </aside>
       <div className="workspace">
         <header className="topbar">
@@ -690,23 +706,13 @@ export default function Home() {
           >
             ☰
           </button>
-          <label className="global-search">
-            <span>⌕</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Поиск по сотрудникам, материалам, событиям..."
-            />
-          </label>
+          {user?.role !== "EMPLOYEE" && <span className="topbar-context">{user?.role === "LEADER" ? "Данные вашего подразделения" : "Панель управления"}</span>}
           <div className="top-actions">
-            <button className="bell" aria-label="Уведомления">
-              ◌
-            </button>
             <div className="identity">
-              <div>А</div>
+              <div>{user?.username?.[0]?.toUpperCase() ?? "?"}</div>
               <span>
-                <b>Администратор</b>
-                <small>Руководитель</small>
+                <b>{user?.username}</b>
+                <small>{user?.role === "ADMIN" ? "Администратор" : user?.role === "LEADER" ? "Руководитель" : "Сотрудник"}</small>
                 <button className="logout" onClick={() => void logout()}>
                   Выйти
                 </button>
@@ -721,6 +727,8 @@ export default function Home() {
               close={() => setSelectedEmployee(null)}
               dictionary={dictionary}
               onSave={updateEmployee}
+              editable={isAdmin}
+              canClose={user?.role !== "EMPLOYEE"}
             />
           ) : error ? (
             <StateCard
@@ -764,6 +772,7 @@ export default function Home() {
               scanRequests,
               unresolved,
               activityDetails,
+              isAdmin,
             })
           )}
         </main>
@@ -801,6 +810,7 @@ function renderView(props: {
   scanNote: string;
   scanRequests: ScanRequest[];
   activityDetails: ActivityDetail[];
+  isAdmin: boolean;
   unresolved: {
     users: {
       authorRaw: string;
@@ -881,6 +891,7 @@ function DashboardView({
   setPeriod,
   loading,
   activityDetails,
+  selectEmployee,
 }: any) {
   const current = dashboard?.activity ?? [];
   const total = current.reduce(
@@ -1043,7 +1054,7 @@ function DashboardView({
                 </BarChart>
               </ResponsiveContainer>
             </article>
-            <RecentEvents events={activityDetails} />
+            <RecentEvents events={activityDetails} selectEmployee={selectEmployee} />
           </section>
         </>
       )}
@@ -1318,7 +1329,17 @@ function StatisticsView({
                 </thead>
                 <tbody>
                   {details.map((event: ActivityDetail) => (
-                    <tr key={event.id}>
+                    <tr
+                      key={event.id}
+                      className="interactive-row"
+                      onClick={() =>
+                        selectEmployee({
+                          id: event.employeeId,
+                          gameName: event.employee.gameName,
+                          active: true,
+                        })
+                      }
+                    >
                       <td>
                         {new Date(event.occurredAt).toLocaleString("ru-RU")}
                       </td>
@@ -1598,7 +1619,7 @@ function PanelTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
     </div>
   );
 }
-function RecentEvents({ events }: { events: ActivityDetail[] }) {
+function RecentEvents({ events, selectEmployee }: { events: ActivityDetail[]; selectEmployee: (employee: Employee) => void }) {
   return (
     <article className="panel wide">
       <PanelTitle
@@ -1617,7 +1638,7 @@ function RecentEvents({ events }: { events: ActivityDetail[] }) {
         </thead>
         <tbody>
           {events.slice(0, 12).map((event) => (
-            <tr key={event.id}>
+            <tr key={event.id} className="interactive-row" onClick={() => selectEmployee({ id: event.employeeId, gameName: event.employee.gameName, active: true })}>
               <td>{new Date(event.occurredAt).toLocaleString("ru-RU")}</td>
               <td>
                 <strong>{event.employee.gameName}</strong>
@@ -1664,6 +1685,7 @@ function EmployeesView({
   employeeSkip,
   setEmployeeSkip,
   createEmployee,
+  isAdmin,
 }: any) {
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState("");
@@ -1704,9 +1726,7 @@ function EmployeesView({
         title="Сотрудники"
         subtitle={`Личный состав: ${employeeTotal}`}
         action={
-          <button className="button" onClick={() => setCreating(true)}>
-            + Добавить сотрудника
-          </button>
+          isAdmin ? <button className="button" onClick={() => setCreating(true)}>+ Добавить сотрудника</button> : undefined
         }
       />
       {creating && (
@@ -1944,11 +1964,15 @@ function EmployeeProfile({
   close,
   dictionary,
   onSave,
+  editable,
+  canClose,
 }: {
   employee: Employee;
   close: () => void;
   dictionary: Dictionary | null;
   onSave: (id: string, values: Record<string, unknown>) => Promise<void>;
+  editable: boolean;
+  canClose: boolean;
 }) {
   const [tab, setTab] = useState("Обзор");
   const [departmentId, setDepartmentId] = useState(
@@ -1993,11 +2017,10 @@ function EmployeeProfile({
       <PageHeader
         title={employee.gameName}
         subtitle={employee.discordDisplayName ?? "Карточка сотрудника"}
-        action={
+        action={canClose ?
           <button className="button secondary" onClick={close}>
             ← К списку
-          </button>
-        }
+          </button> : undefined}
       />
       <section className="profile-card">
         <div className="profile-avatar">{employee.gameName[0]}</div>
@@ -2017,11 +2040,8 @@ function EmployeeProfile({
       <div className="tabs profile-tabs">
         {[
           "Обзор",
-          "Статистика",
           "История",
-          "Обучение",
           "Активность",
-          "Заметки",
         ].map((item) => (
           <button
             key={item}
@@ -2043,7 +2063,7 @@ function EmployeeProfile({
                 <dt>Звание</dt>
                 <dd>{employee.rank?.name ?? "Не назначено"}</dd>
               </dl>
-              <div className="editor">
+              {editable ? <div className="editor">
                 <label>
                   Игровое имя
                   <input
@@ -2134,14 +2154,11 @@ function EmployeeProfile({
                 >
                   {saving ? "Сохранение..." : "Сохранить изменения"}
                 </button>
-              </div>
+              </div> : <p className="muted">Просмотр профиля доступен без возможности изменения.</p>}
             </div>
             <div>
-              <PanelTitle eyebrow="СТАТИСТИКА" title="Нет событий за период" />
-              <EmptyState
-                title="Активность еще не загружена"
-                text="Подробная статистика появится после подключения API карточки сотрудника."
-              />
+              <PanelTitle eyebrow="СТАТИСТИКА" title="Последняя активность" />
+              <ProfileActivity employee={employee} />
             </div>
           </div>
         ) : tab === "История" ? (
@@ -2186,8 +2203,6 @@ function IntegrationsView({
       <section className="panel">
         <div className="tabs">
           <button className="selected">Каналы</button>
-          <button>Настройки</button>
-          <button>Статус</button>
         </div>
         <DataTable>
           <thead>

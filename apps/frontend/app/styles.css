@@ -25,6 +25,7 @@ button { cursor: pointer; }
 .global-search { width: min(540px, 60%); height: 38px; border: 1px solid var(--line); background: #151b25; border-radius: 7px; display: flex; align-items: center; gap: 10px; padding: 0 12px; color: #6f7d92; }
 .global-search input { border: 0; background: transparent; outline: 0; color: var(--text); width: 100%; font-size: 13px; }
 .top-actions { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+.topbar-context { color: var(--muted); font-size: 12px; }
 .bell, .menu-button { border: 0; background: transparent; color: #aebbd0; font-size: 20px; }
 .identity > div, .avatar { width: 30px; height: 30px; border-radius: 50%; font-size: 12px; }
 .identity b { font-size: 12px; }

@@ -239,6 +239,7 @@ export class PortalService {
         message?.sourceMessageId?.replace(/^[0-9]+-/, "") ?? null;
       return {
         id: event.id,
+        employeeId: event.employeeId,
         occurredAt: event.occurredAt,
         quantity: event.quantity,
         employee: event.employee,
@@ -1047,7 +1048,7 @@ export class PortalController {
   ) {
     return this.portal.employees(query, user);
   }
-  @Get("employees/:id") @Roles(Role.LEADER, Role.ADMIN) employee(
+  @Get("employees/:id") @Roles(Role.EMPLOYEE, Role.LEADER, Role.ADMIN) employee(
     @Param("id") id: string,
     @CurrentUser() user: { role: Role; employeeId: string | null },
   ) {

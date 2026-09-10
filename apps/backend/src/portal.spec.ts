@@ -64,4 +64,19 @@ describe("PortalService personnel access", () => {
       }),
     );
   });
+
+  it("limits an employee profile lookup to the linked employee", async () => {
+    employee.findFirst.mockResolvedValue(null);
+    await expect(
+      service.employee("another-employee", {
+        role: Role.EMPLOYEE,
+        employeeId: "own-employee",
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(employee.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "own-employee" },
+      }),
+    );
+  });
 });
