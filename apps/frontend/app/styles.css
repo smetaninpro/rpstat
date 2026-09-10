@@ -102,7 +102,17 @@ button { cursor: pointer; }
 .editor { display: grid; gap: 12px; margin-top: 20px; }
 .editor label { display: grid; gap: 7px; color: var(--muted); font-size: 11px; }
 .editor select { border: 1px solid #ffffff1f; border-radius: 7px; background: #0f091a; color: var(--text); padding: 10px; }
-.editor input { border: 1px solid #ffffff1f; border-radius: 7px; background: #0f091a; color: var(--text); padding: 10px; }
+.editor input, .editor textarea { border: 1px solid #ffffff1f; border-radius: 7px; background: #0f091a; color: var(--text); padding: 10px; }
+.editor textarea { min-height: 130px; resize: vertical; }
+.materials-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.material-card { background: linear-gradient(155deg, var(--panel), #151b25); border: 1px solid var(--line); border-radius: 9px; padding: 20px; display: flex; flex-direction: column; min-height: 230px; }
+.material-card.archived { opacity: .62; }
+.material-meta, .material-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.material-card h2 { font-size: 17px; margin: 15px 0 8px; letter-spacing: -.025em; }
+.material-card p { color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-wrap; margin: 0 0 18px; }
+.material-actions { margin-top: auto; }
+.material-actions .link-button { margin-left: auto; }
+.material-actions .link-button + .link-button { margin-left: 0; }
 .form-panel { margin-bottom: 12px; }.employee-form, .dictionary-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }.employee-form .form-error, .employee-form .row-actions, .dictionary-form .form-error, .dictionary-form .row-actions { grid-column: 1 / -1; }.pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 16px; color: var(--muted); font-size: 11px; }.pagination span { margin-right: auto; }.history-row { display: grid; gap: 4px; border-top: 1px solid #253042; padding: 11px 0; font-size: 12px; }.history-row b { color: var(--text); }.history-row span { color: var(--muted); font-size: 11px; }
 .row-actions { display: flex; align-items: center; gap: 6px; }
 .source-settings { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 18px; margin-top: 14px; border: 1px solid #fd89254d; border-radius: 10px; background: linear-gradient(110deg, #2b1729, #181024); }.settings-head { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: flex-start; }.settings-head h3 { margin: 0; font-size: 16px; }.source-settings .button { width: max-content; align-self: end; }

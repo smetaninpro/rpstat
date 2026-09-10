@@ -43,6 +43,14 @@ class CreateManualEventDto {
   @IsString() occurredAt!: string;
   @IsString() @Length(3, 1000) reason!: string;
 }
+class MaterialDto {
+  @IsString() @Length(3, 160) title!: string;
+  @IsString() @Length(1, 10000) body!: string;
+  @IsOptional() @IsString() @Length(1, 2048) linkUrl?: string | null;
+  @IsBoolean() isPublic!: boolean;
+  @IsOptional() @IsString() departmentId?: string | null;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
 class PaginationDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) take = 25;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) skip = 0;
@@ -182,7 +190,7 @@ export class PortalService {
     employeeId: string | null;
   }) {
     if (user.role === Role.ADMIN) return undefined;
-    if (user.role !== Role.LEADER || !user.employeeId) return null;
+    if ((user.role !== Role.LEADER && user.role !== Role.EMPLOYEE) || !user.employeeId) return null;
     return (
       (
         await this.prisma.employee.findUnique({
@@ -201,6 +209,44 @@ export class PortalService {
       : departmentId
         ? { departmentId }
         : null;
+  }
+  private async materialWhere(user: { role: Role; employeeId: string | null }) {
+    if (user.role === Role.ADMIN) return {};
+    const departmentId = await this.departmentScope(user);
+    return departmentId ? { OR: [{ isPublic: true }, { departmentId }] } : { isPublic: true };
+  }
+  async materials(user: { role: Role; employeeId: string | null }) {
+    return this.prisma.material.findMany({
+      where: { active: true, ...(await this.materialWhere(user)) },
+      include: { department: { select: { id: true, name: true, code: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+  async adminMaterials() {
+    return this.prisma.material.findMany({ include: { department: { select: { id: true, name: true, code: true } } }, orderBy: { createdAt: "desc" } });
+  }
+  private async validateMaterial(dto: MaterialDto) {
+    if (!dto.isPublic && !dto.departmentId) throw new BadRequestException("Укажите подразделение или включите общий доступ");
+    if (dto.linkUrl) {
+      let url: URL;
+      try { url = new URL(dto.linkUrl); } catch { throw new BadRequestException("Укажите корректную ссылку HTTPS"); }
+      if (url.protocol !== "https:") throw new BadRequestException("Разрешены только HTTPS-ссылки");
+    }
+    if (dto.departmentId && !(await this.prisma.department.findFirst({ where: { id: dto.departmentId, active: true } }))) throw new BadRequestException("Подразделение не найдено или архивировано");
+  }
+  async createMaterial(dto: MaterialDto, userId: string) {
+    await this.validateMaterial(dto);
+    const material = await this.prisma.material.create({ data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null }, include: { department: true } });
+    await this.prisma.auditLog.create({ data: { userId, action: "MATERIAL_CREATED", entityType: "Material", entityId: material.id, newValue: { title: material.title, isPublic: material.isPublic, departmentId: material.departmentId } } });
+    return material;
+  }
+  async updateMaterial(id: string, dto: MaterialDto, userId: string) {
+    await this.validateMaterial(dto);
+    const existing = await this.prisma.material.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Материал не найден");
+    const material = await this.prisma.material.update({ where: { id }, data: { title: dto.title.trim(), body: dto.body.trim(), linkUrl: dto.linkUrl?.trim() || null, isPublic: dto.isPublic, departmentId: dto.departmentId || null, active: dto.active ?? existing.active }, include: { department: true } });
+    await this.prisma.auditLog.create({ data: { userId, action: material.active ? "MATERIAL_UPDATED" : "MATERIAL_ARCHIVED", entityType: "Material", entityId: id, oldValue: { title: existing.title, active: existing.active }, newValue: { title: material.title, active: material.active } } });
+    return material;
   }
   async activityDetails(
     period: "week" | "month",
@@ -1070,6 +1116,10 @@ export class PortalController {
   @Get("dictionaries") @Roles(Role.LEADER, Role.ADMIN) dictionaries() {
     return this.portal.dictionaries();
   }
+  @Get("materials") @Roles(Role.EMPLOYEE, Role.LEADER, Role.ADMIN) materials(@CurrentUser() user: { role: Role; employeeId: string | null }) { return this.portal.materials(user); }
+  @Get("admin/materials") @Roles(Role.ADMIN) adminMaterials() { return this.portal.adminMaterials(); }
+  @Post("admin/materials") @Roles(Role.ADMIN) createMaterial(@Body() dto: MaterialDto, @CurrentUser() user: { id: string }) { return this.portal.createMaterial(dto, user.id); }
+  @Patch("admin/materials/:id") @Roles(Role.ADMIN) updateMaterial(@Param("id") id: string, @Body() dto: MaterialDto, @CurrentUser() user: { id: string }) { return this.portal.updateMaterial(id, dto, user.id); }
   @Get("leadership/analytics")
   @Roles(Role.LEADER, Role.ADMIN)
   leadershipAnalytics(

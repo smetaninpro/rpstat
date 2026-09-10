@@ -167,6 +167,21 @@ model Department {
   sortOrder Int @default(0)
   employees Employee[]
   history EmployeePositionHistory[]
+  materials Material[]
+}
+
+model Material {
+  id String @id @default(uuid())
+  title String
+  body String @db.Text
+  linkUrl String?
+  isPublic Boolean @default(false)
+  departmentId String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  department Department? @relation(fields: [departmentId], references: [id])
+  @@index([active, isPublic, departmentId, createdAt])
 }
 
 model EmployeeAlias {

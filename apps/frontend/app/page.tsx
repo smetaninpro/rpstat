@@ -111,6 +111,16 @@ type EmployeeFilters = {
   active: string;
 };
 type DictionaryKind = "departments" | "positions" | "ranks";
+type Material = {
+  id: string;
+  title: string;
+  body: string;
+  linkUrl: string | null;
+  isPublic: boolean;
+  departmentId: string | null;
+  active: boolean;
+  department: { id: string; name: string; code: string } | null;
+};
 type ActivityDetail = {
   id: string;
   employeeId: string;
@@ -196,6 +206,7 @@ const nav: { view: View; label: string; glyph: string; roles: User["role"][] }[]
   { view: "statistics-departments", label: "Отчет: подразделения", glyph: "▦", roles: ["ADMIN", "LEADER"] },
   { view: "statistics-activity", label: "Отчет: активность", glyph: "◈", roles: ["ADMIN", "LEADER"] },
   { view: "statistics-sources", label: "Источники отчета", glyph: "⌁", roles: ["ADMIN", "LEADER"] },
+  { view: "materials", label: "Материалы", glyph: "▤", roles: ["EMPLOYEE", "LEADER", "ADMIN"] },
   { view: "integrations", label: "Интеграции", glyph: "⌁", roles: ["ADMIN"] },
   { view: "review", label: "Проверка данных", glyph: "!", roles: ["ADMIN"] },
   { view: "unresolved", label: "Неразобрано", glyph: "?", roles: ["ADMIN"] },
@@ -321,6 +332,7 @@ export default function Home() {
   const [employeeSkip, setEmployeeSkip] = useState(0);
   const [sources, setSources] = useState<Source[]>([]);
   const [dictionary, setDictionary] = useState<Dictionary | null>(null);
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(false);
   const [scanNote, setScanNote] = useState("");
@@ -357,7 +369,8 @@ export default function Home() {
       setUser(currentUser);
       if (currentUser.role === "EMPLOYEE") {
         if (!currentUser.employeeId) throw new Error("PROFILE_NOT_LINKED");
-        setSelectedEmployee(await fetchJson<Employee>("/api/my-profile"));
+        if (view !== "materials")
+          setSelectedEmployee(await fetchJson<Employee>("/api/my-profile"));
         setAuthenticated(true);
         return;
       }
@@ -439,6 +452,14 @@ export default function Home() {
       }
       if (next === "dictionaries")
         setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
+      if (next === "materials") {
+        const [materialValue, dictionaryValue] = await Promise.all([
+          fetchJson<Material[]>(isAdmin ? "/api/admin/materials" : "/api/materials"),
+          isAdmin ? fetchJson<Dictionary>("/api/dictionaries") : Promise.resolve(null),
+        ]);
+        setMaterials(materialValue);
+        if (dictionaryValue) setDictionary(dictionaryValue);
+      }
     } catch (reason) {
       setError(
         reason instanceof Error && reason.message === "HTTP 403"
@@ -464,10 +485,11 @@ export default function Home() {
     if (authenticated) void loadDashboard(period);
   }, [period]);
   useEffect(() => {
-    if (authenticated && user?.role !== "EMPLOYEE") void loadView(view);
+    if (authenticated) void loadView(view);
   }, [view, authenticated, user]);
   useEffect(() => {
-    if (user && user.role !== "EMPLOYEE" && !allowedViews(user.role).some((item) => item.view === view)) go("dashboard");
+    if (user && !allowedViews(user.role).some((item) => item.view === view))
+      go(user.role === "EMPLOYEE" ? "materials" : "dashboard");
   }, [user, view]);
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -498,6 +520,7 @@ export default function Home() {
     setAnalytics(null);
     setEmployees([]);
     setSources([]);
+    setMaterials([]);
     setReview(null);
     setSelectedEmployee(null);
   }
@@ -609,6 +632,19 @@ export default function Home() {
           "Не удалось сохранить значение",
       );
     setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
+  }
+  async function saveMaterial(id: string | null, values: Record<string, unknown>) {
+    const response = await fetch(`${api}/api/admin/materials${id ? `/${id}` : ""}`, {
+      method: id ? "PATCH" : "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "x-csrf-token": csrf() },
+      body: JSON.stringify(values),
+    });
+    if (!response.ok)
+      throw new Error(
+        (await response.json().catch(() => null))?.message ?? "Не удалось сохранить материал",
+      );
+    await loadView("materials");
   }
   if (!authenticated)
     return (
@@ -751,6 +787,7 @@ export default function Home() {
               employeeTotal,
               sources,
               dictionary,
+              materials,
               review,
               updateSource,
               selectEmployee: openEmployee,
@@ -773,6 +810,7 @@ export default function Home() {
               unresolved,
               activityDetails,
               isAdmin,
+              saveMaterial,
             })
           )}
         </main>
@@ -811,6 +849,8 @@ function renderView(props: {
   scanRequests: ScanRequest[];
   activityDetails: ActivityDetail[];
   isAdmin: boolean;
+  materials: Material[];
+  saveMaterial: (id: string | null, values: Record<string, unknown>) => Promise<void>;
   unresolved: {
     users: {
       authorRaw: string;
@@ -843,6 +883,7 @@ function renderView(props: {
   if (props.view === "review") return <ReviewView {...props} />;
   if (props.view === "unresolved") return <UnresolvedView {...props} />;
   if (props.view === "dictionaries") return <DictionariesView {...props} />;
+  if (props.view === "materials") return <MaterialsView {...props} />;
   const titles: Record<string, [string, string]> = {
     training: ["Обучение", "Тесты, аттестации и результаты обучения"],
     materials: ["Материалы", "Справочные и методические материалы"],
@@ -860,6 +901,85 @@ function renderView(props: {
           text="Интерфейс и навигация подготовлены. Данные появятся после подключения соответствующего серверного API."
         />
       </section>
+    </>
+  );
+}
+
+function MaterialsView({
+  materials,
+  dictionary,
+  isAdmin,
+  saveMaterial,
+}: {
+  materials: Material[];
+  dictionary: Dictionary | null;
+  isAdmin: boolean;
+  saveMaterial: (id: string | null, values: Record<string, unknown>) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<Material | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState("");
+  const shown = isAdmin ? materials : materials.filter((material) => material.active);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const isPublic = form.get("isPublic") === "true";
+    const departmentId = String(form.get("departmentId") ?? "") || null;
+    if (!isPublic && !departmentId) {
+      setFormError("Выберите подразделение или включите общий доступ.");
+      return;
+    }
+    setFormError("");
+    try {
+      await saveMaterial(editing?.id ?? null, {
+        title: String(form.get("title") ?? ""),
+        body: String(form.get("body") ?? ""),
+        linkUrl: String(form.get("linkUrl") ?? "") || null,
+        isPublic,
+        departmentId,
+        active: editing?.active ?? true,
+      });
+      setEditing(null);
+      setCreating(false);
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "Не удалось сохранить материал.");
+    }
+  }
+  return (
+    <>
+      <PageHeader
+        title="Материалы"
+        subtitle="Справочные и методические материалы"
+        action={isAdmin ? <button className="button" onClick={() => { setEditing(null); setCreating(true); setFormError(""); }}>Добавить материал</button> : undefined}
+      />
+      {isAdmin && (creating || editing) && (
+        <section className="panel form-panel">
+          <PanelTitle eyebrow="РЕДАКТИРОВАНИЕ" title={editing ? "Изменить материал" : "Новый материал"} />
+          <form className="editor material-form" onSubmit={submit}>
+            <label>Название<input name="title" required minLength={3} maxLength={160} defaultValue={editing?.title ?? ""} /></label>
+            <label>Содержание<textarea name="body" required maxLength={10000} defaultValue={editing?.body ?? ""} /></label>
+            <label>HTTPS-ссылка (необязательно)<input name="linkUrl" type="url" placeholder="https://..." defaultValue={editing?.linkUrl ?? ""} /></label>
+            <label>Доступ<select name="isPublic" defaultValue={String(editing?.isPublic ?? true)}><option value="true">Общий доступ</option><option value="false">Только подразделение</option></select></label>
+            <label>Подразделение<select name="departmentId" defaultValue={editing?.departmentId ?? ""}><option value="">Не выбрано</option>{dictionary?.departments.filter((department) => department.active).map((department) => <option key={department.id} value={department.id}>{department.code} - {department.name}</option>)}</select></label>
+            {formError && <p className="form-error">{formError}</p>}
+            <div className="row-actions"><button className="button">Сохранить</button><button type="button" className="button secondary" onClick={() => { setEditing(null); setCreating(false); }}>Отмена</button></div>
+          </form>
+        </section>
+      )}
+      {shown.length === 0 ? <section className="panel"><EmptyState title="Материалов пока нет" text="Доступные справочные и методические материалы появятся здесь." /></section> : (
+        <section className="materials-grid">
+          {shown.map((material) => (
+            <article className={material.active ? "material-card" : "material-card archived"} key={material.id}>
+              <div className="material-meta"><Badge tone={material.isPublic ? "good" : "warn"}>{material.isPublic ? "Общий доступ" : material.department?.code ?? "Подразделение"}</Badge>{!material.active && <Badge tone="danger">Архив</Badge>}</div>
+              <h2>{material.title}</h2><p>{material.body}</p>
+              <div className="material-actions">
+                {material.linkUrl && <a className="discord-link" href={material.linkUrl} target="_blank" rel="noopener noreferrer">Открыть ссылку ↗</a>}
+                {isAdmin && <><button className="link-button" onClick={() => { setCreating(false); setEditing(material); setFormError(""); }}>Изменить</button><button className="link-button" onClick={() => void saveMaterial(material.id, { title: material.title, body: material.body, linkUrl: material.linkUrl, isPublic: material.isPublic, departmentId: material.departmentId, active: !material.active })}>{material.active ? "Архивировать" : "Восстановить"}</button></>}
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
     </>
   );
 }

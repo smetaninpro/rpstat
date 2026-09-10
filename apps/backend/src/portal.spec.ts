@@ -18,6 +18,7 @@ describe("PortalService personnel access", () => {
     department: { findFirst: jest.fn() },
     $transaction: jest.fn(),
     auditLog: { create: jest.fn() },
+    material: { findMany: jest.fn() },
   } as never;
   const service = new PortalService(prisma);
 
@@ -63,6 +64,24 @@ describe("PortalService personnel access", () => {
         where: { id: "other-department", departmentId: "department-a" },
       }),
     );
+  });
+
+  it("shows public and own-department materials to a leader", async () => {
+    employee.findUnique.mockResolvedValue({ departmentId: "department-a" });
+    (prisma as any).material.findMany.mockResolvedValue([]);
+    await service.materials({ role: Role.LEADER, employeeId: "leader" });
+    expect((prisma as any).material.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ OR: [{ isPublic: true }, { departmentId: "department-a" }] }),
+    }));
+  });
+
+  it("shows only public materials to an employee without a department", async () => {
+    employee.findUnique.mockResolvedValue({ departmentId: null });
+    (prisma as any).material.findMany.mockResolvedValue([]);
+    await service.materials({ role: Role.EMPLOYEE, employeeId: "employee" });
+    expect((prisma as any).material.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ isPublic: true }),
+    }));
   });
 
   it("limits an employee profile lookup to the linked employee", async () => {
