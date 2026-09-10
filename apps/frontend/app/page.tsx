@@ -81,7 +81,35 @@ type Employee = {
   positionRaw?: string | null;
   department?: { id: string; code: string } | null;
   active: boolean;
+  discordUserId?: string | null;
+  events?: {
+    id: string;
+    occurredAt: string;
+    quantity: number;
+    activityType: { name: string };
+  }[];
+  rankHistory?: {
+    id: string;
+    assignedAt: string;
+    removedAt?: string | null;
+    rank: { name: string };
+  }[];
+  positionHistory?: {
+    id: string;
+    detectedAt: string;
+    positionRaw: string;
+    position?: { name: string } | null;
+    department?: { code: string } | null;
+  }[];
 };
+type EmployeeFilters = {
+  search: string;
+  departmentId: string;
+  rankId: string;
+  positionId: string;
+  active: string;
+};
+type DictionaryKind = "departments" | "positions" | "ranks";
 type ActivityDetail = {
   id: string;
   occurredAt: string;
@@ -114,9 +142,27 @@ type ScanRequest = {
 };
 type Dictionary = {
   activityTypes: { id: string; name: string }[];
-  departments: { id: string; code: string; name: string }[];
-  positions: { id: string; name: string }[];
-  ranks: { id: string; name: string }[];
+  departments: {
+    id: string;
+    code: string;
+    name: string;
+    active: boolean;
+    sortOrder?: number;
+  }[];
+  positions: {
+    id: string;
+    name: string;
+    shortName?: string | null;
+    active: boolean;
+    sortOrder?: number;
+  }[];
+  ranks: {
+    id: string;
+    name: string;
+    shortName?: string | null;
+    active: boolean;
+    sortOrder?: number;
+  }[];
 };
 type Review = {
   items: {
@@ -166,14 +212,14 @@ function EmptyState({
 }: {
   title: string;
   text: string;
-  action?: string;
+  action?: React.ReactNode;
 }) {
   return (
     <div className="empty">
       <div className="empty-mark">—</div>
       <strong>{title}</strong>
       <span>{text}</span>
-      {action && <button className="button secondary">{action}</button>}
+      {action}
     </div>
   );
 }
@@ -265,6 +311,14 @@ export default function Home() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeTotal, setEmployeeTotal] = useState(0);
+  const [employeeFilters, setEmployeeFilters] = useState<EmployeeFilters>({
+    search: "",
+    departmentId: "",
+    rankId: "",
+    positionId: "",
+    active: "true",
+  });
+  const [employeeSkip, setEmployeeSkip] = useState(0);
   const [sources, setSources] = useState<Source[]>([]);
   const [dictionary, setDictionary] = useState<Dictionary | null>(null);
   const [review, setReview] = useState<Review | null>(null);
@@ -313,17 +367,28 @@ export default function Home() {
       setLoading(false);
     }
   }
+  async function loadEmployees(filters = employeeFilters, skip = employeeSkip) {
+    const params = new URLSearchParams({ take: "25", skip: String(skip) });
+    (Object.entries(filters) as [keyof EmployeeFilters, string][]).forEach(
+      ([key, value]) => {
+        if (value) params.set(key, value);
+      },
+    );
+    const [value, dictionaryValue] = await Promise.all([
+      fetchJson<{ items: Employee[]; total: number }>(
+        `/api/employees?${params}`,
+      ),
+      fetchJson<Dictionary>("/api/dictionaries"),
+    ]);
+    setEmployees(value.items);
+    setEmployeeTotal(value.total);
+    setDictionary(dictionaryValue);
+  }
   async function loadView(next = view) {
     setError("");
     try {
       if (next === "employees") {
-        const [value, dictionaryValue] = await Promise.all([
-          fetchJson<{ items: Employee[]; total: number }>("/api/employees"),
-          fetchJson<Dictionary>("/api/dictionaries"),
-        ]);
-        setEmployees(value.items);
-        setEmployeeTotal(value.total);
-        setDictionary(dictionaryValue);
+        await loadEmployees();
       }
       if (next === "integrations") {
         const [sourceValue, dictionaryValue, requestValue] = await Promise.all([
@@ -461,13 +526,71 @@ export default function Home() {
       headers: { "content-type": "application/json", "x-csrf-token": csrf() },
       body: JSON.stringify(values),
     });
-    if (!response.ok) throw new Error("employee update");
+    if (!response.ok)
+      throw new Error(
+        (await response.json().catch(() => null))?.message ??
+          "Не удалось сохранить сотрудника",
+      );
     const updated = (await response.json()) as Employee;
     setEmployees((current) =>
       current.map((employee) => (employee.id === id ? updated : employee)),
     );
     setSelectedEmployee(updated);
-    await loadDashboard();
+    await Promise.all([loadDashboard(), loadEmployees()]);
+  }
+  async function createEmployee(values: Record<string, unknown>) {
+    const response = await fetch(`${api}/api/employees`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "x-csrf-token": csrf() },
+      body: JSON.stringify(values),
+    });
+    if (!response.ok)
+      throw new Error(
+        (await response.json().catch(() => null))?.message ??
+          "Не удалось создать сотрудника",
+      );
+    const created = (await response.json()) as Employee;
+    await Promise.all([loadEmployees(), loadDashboard()]);
+    await openEmployee(created);
+  }
+  async function openEmployee(employee: Employee) {
+    setError("");
+    setLoading(true);
+    try {
+      setSelectedEmployee(
+        await fetchJson<Employee>(`/api/employees/${employee.id}`),
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error && reason.message === "HTTP 403"
+          ? "Нет доступа к карточке сотрудника."
+          : "Не удалось загрузить карточку сотрудника.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function saveDictionary(
+    kind: DictionaryKind,
+    id: string | null,
+    values: Record<string, unknown>,
+  ) {
+    const response = await fetch(
+      `${api}/api/admin/dictionaries/${kind}${id ? `/${id}` : ""}`,
+      {
+        method: id ? "PATCH" : "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-csrf-token": csrf() },
+        body: JSON.stringify(values),
+      },
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.json().catch(() => null))?.message ??
+          "Не удалось сохранить значение",
+      );
+    setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
   }
   if (!authenticated)
     return (
@@ -511,11 +634,6 @@ export default function Home() {
         </form>
       </main>
     );
-  const filteredEmployees = employees.filter((employee) =>
-    `${employee.gameName} ${employee.discordDisplayName ?? ""}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
   return (
     <div className="app">
       <aside className={menu ? "sidebar open" : "sidebar"}>
@@ -621,13 +739,26 @@ export default function Home() {
               period,
               setPeriod,
               loading,
-              employees: filteredEmployees,
+              employees,
               employeeTotal,
               sources,
               dictionary,
               review,
               updateSource,
-              selectEmployee: setSelectedEmployee,
+              selectEmployee: openEmployee,
+              employeeFilters,
+              setEmployeeFilters: (filters: EmployeeFilters) => {
+                setEmployeeFilters(filters);
+                setEmployeeSkip(0);
+                void loadEmployees(filters, 0);
+              },
+              employeeSkip,
+              setEmployeeSkip: (skip: number) => {
+                setEmployeeSkip(skip);
+                void loadEmployees(employeeFilters, skip);
+              },
+              createEmployee,
+              saveDictionary,
               requestScan,
               scanNote,
               scanRequests,
@@ -651,6 +782,16 @@ function renderView(props: {
   loading: boolean;
   employees: Employee[];
   employeeTotal: number;
+  employeeFilters: EmployeeFilters;
+  setEmployeeFilters: (filters: EmployeeFilters) => void;
+  employeeSkip: number;
+  setEmployeeSkip: (skip: number) => void;
+  createEmployee: (values: Record<string, unknown>) => Promise<void>;
+  saveDictionary: (
+    kind: DictionaryKind,
+    id: string | null,
+    values: Record<string, unknown>,
+  ) => Promise<void>;
   sources: Source[];
   dictionary: Dictionary | null;
   review: Review | null;
@@ -752,12 +893,10 @@ function DashboardView({
     value: period === "week" ? item.weekQuantity : item.monthQuantity,
     color: colors[index % colors.length],
   }));
-  const top = (analytics?.employees ?? [])
-    .slice(0, 8)
-    .map((employee: any) => ({
-      name: employee.gameName,
-      total: employee.total,
-    }));
+  const top = (analytics?.employees ?? []).slice(0, 8).map((employee: any) => ({
+    name: employee.gameName,
+    total: employee.total,
+  }));
   return (
     <>
       <PageHeader
@@ -1247,15 +1386,13 @@ function ReportEmployees({
     color: colors[index % colors.length],
   }));
   const activityValue = (employee: any, name: string) =>
-    employee.activity.find((activity: any) => activity.name === name)?.quantity ??
-    0;
-  const barData = filtered
-    .slice(0, 12)
-    .map((employee) => ({
-      name: employee.gameName,
-      arrests: activityValue(employee, "Аресты"),
-      fines: activityValue(employee, "Штрафы"),
-    }));
+    employee.activity.find((activity: any) => activity.name === name)
+      ?.quantity ?? 0;
+  const barData = filtered.slice(0, 12).map((employee) => ({
+    name: employee.gameName,
+    arrests: activityValue(employee, "Аресты"),
+    fines: activityValue(employee, "Штрафы"),
+  }));
   return (
     <>
       <section className="panel report-filter">
@@ -1281,8 +1418,16 @@ function ReportEmployees({
         </label>
       </section>
       <section className="metrics">
-        <MetricCard label="Аресты" value={activities.get("Аресты") ?? 0} index={0} />
-        <MetricCard label="Штрафы" value={activities.get("Штрафы") ?? 0} index={1} />
+        <MetricCard
+          label="Аресты"
+          value={activities.get("Аресты") ?? 0}
+          index={0}
+        />
+        <MetricCard
+          label="Штрафы"
+          value={activities.get("Штрафы") ?? 0}
+          index={1}
+        />
         <MetricCard
           label="Всего действий"
           value={pieData.reduce((sum, item) => sum + item.value, 0)}
@@ -1345,10 +1490,7 @@ function ReportEmployees({
           )}
         </article>
         <article className="panel chart-panel">
-          <PanelTitle
-            eyebrow="АРЕСТЫ И ШТРАФЫ"
-            title="Сравнение сотрудников"
-          />
+          <PanelTitle eyebrow="АРЕСТЫ И ШТРАФЫ" title="Сравнение сотрудников" />
           <ResponsiveContainer width="100%" height={330}>
             <BarChart data={barData}>
               <CartesianGrid vertical={false} stroke="#342943" />
@@ -1512,20 +1654,184 @@ function RecentEvents({ events }: { events: ActivityDetail[] }) {
     </article>
   );
 }
-function EmployeesView({ employees, employeeTotal, selectEmployee }: any) {
+function EmployeesView({
+  employees,
+  employeeTotal,
+  selectEmployee,
+  dictionary,
+  employeeFilters,
+  setEmployeeFilters,
+  employeeSkip,
+  setEmployeeSkip,
+  createEmployee,
+}: any) {
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const changeFilter = (key: keyof EmployeeFilters, value: string) =>
+    setEmployeeFilters({ ...employeeFilters, [key]: value });
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const gameName = String(form.get("gameName") ?? "").trim();
+    if (!gameName) {
+      setFormError("Укажите игровое имя.");
+      setSaving(false);
+      return;
+    }
+    try {
+      await createEmployee(
+        Object.fromEntries(
+          [...form.entries()].filter(([, value]) => value !== ""),
+        ),
+      );
+      setCreating(false);
+    } catch (reason) {
+      setFormError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось создать сотрудника",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <>
       <PageHeader
         title="Сотрудники"
         subtitle={`Личный состав: ${employeeTotal}`}
-        action={<button className="button">+ Добавить сотрудника</button>}
+        action={
+          <button className="button" onClick={() => setCreating(true)}>
+            + Добавить сотрудника
+          </button>
+        }
       />
+      {creating && (
+        <section className="panel form-panel">
+          <div className="detail-toolbar">
+            <PanelTitle eyebrow="НОВАЯ ЗАПИСЬ" title="Добавить сотрудника" />
+            <button className="link-button" onClick={() => setCreating(false)}>
+              Закрыть
+            </button>
+          </div>
+          <form className="editor employee-form" onSubmit={submit}>
+            <label>
+              Игровое имя
+              <input name="gameName" required maxLength={120} autoFocus />
+            </label>
+            <label>
+              Discord ID
+              <input name="discordUserId" maxLength={64} />
+            </label>
+            <label>
+              Отображаемое имя Discord
+              <input name="discordDisplayName" maxLength={256} />
+            </label>
+            <DictionarySelect
+              label="Подразделение"
+              name="departmentId"
+              items={dictionary?.departments}
+              department
+            />
+            <DictionarySelect
+              label="Должность"
+              name="positionId"
+              items={dictionary?.positions}
+            />
+            <DictionarySelect
+              label="Звание"
+              name="rankId"
+              items={dictionary?.ranks}
+            />
+            {formError && <p className="form-error">{formError}</p>}
+            <div className="row-actions">
+              <button className="button" disabled={saving}>
+                {saving ? "Создание..." : "Создать сотрудника"}
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => setCreating(false)}
+              >
+                Отмена
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
       <section className="panel">
         <div className="filterbar">
-          <button className="filter">Подразделение ▾</button>
-          <button className="filter">Звание ▾</button>
-          <button className="filter">Должность ▾</button>
-          <button className="filter">Статус ▾</button>
+          <input
+            className="filter"
+            value={employeeFilters.search}
+            onChange={(event) => changeFilter("search", event.target.value)}
+            placeholder="Поиск по имени или Discord"
+            aria-label="Поиск сотрудников"
+          />
+          <select
+            className="filter"
+            value={employeeFilters.departmentId}
+            onChange={(event) =>
+              changeFilter("departmentId", event.target.value)
+            }
+          >
+            <option value="">Все подразделения</option>
+            {dictionary?.departments.map((item: any) => (
+              <option key={item.id} value={item.id}>
+                {item.code}
+              </option>
+            ))}
+          </select>
+          <select
+            className="filter"
+            value={employeeFilters.rankId}
+            onChange={(event) => changeFilter("rankId", event.target.value)}
+          >
+            <option value="">Все звания</option>
+            {dictionary?.ranks.map((item: any) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="filter"
+            value={employeeFilters.positionId}
+            onChange={(event) => changeFilter("positionId", event.target.value)}
+          >
+            <option value="">Все должности</option>
+            {dictionary?.positions.map((item: any) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="filter"
+            value={employeeFilters.active}
+            onChange={(event) => changeFilter("active", event.target.value)}
+          >
+            <option value="">Все статусы</option>
+            <option value="true">Активные</option>
+            <option value="false">Архивные</option>
+          </select>
+          <button
+            className="link-button"
+            onClick={() =>
+              setEmployeeFilters({
+                search: "",
+                departmentId: "",
+                rankId: "",
+                positionId: "",
+                active: "true",
+              })
+            }
+          >
+            Сбросить
+          </button>
         </div>
         <DataTable>
           <thead>
@@ -1579,8 +1885,58 @@ function EmployeesView({ employees, employeeTotal, selectEmployee }: any) {
             text="Измените фильтр или импортируйте данные Discord."
           />
         )}
+        {employeeTotal > 25 && (
+          <div className="pagination">
+            <span>
+              Показано {employeeSkip + 1}–
+              {Math.min(employeeSkip + employees.length, employeeTotal)} из{" "}
+              {employeeTotal}
+            </span>
+            <button
+              className="button secondary"
+              disabled={!employeeSkip}
+              onClick={() => setEmployeeSkip(Math.max(0, employeeSkip - 25))}
+            >
+              Назад
+            </button>
+            <button
+              className="button secondary"
+              disabled={employeeSkip + employees.length >= employeeTotal}
+              onClick={() => setEmployeeSkip(employeeSkip + 25)}
+            >
+              Далее
+            </button>
+          </div>
+        )}
       </section>
     </>
+  );
+}
+function DictionarySelect({
+  label,
+  name,
+  items,
+  department = false,
+}: {
+  label: string;
+  name: string;
+  items?: any[];
+  department?: boolean;
+}) {
+  return (
+    <label>
+      {label}
+      <select name={name} defaultValue="">
+        <option value="">Не назначено</option>
+        {items
+          ?.filter((item) => item.active)
+          .map((item) => (
+            <option key={item.id} value={item.id}>
+              {department ? `${item.code} — ${item.name}` : item.name}
+            </option>
+          ))}
+      </select>
+    </label>
   );
 }
 function EmployeeProfile({
@@ -1600,15 +1956,34 @@ function EmployeeProfile({
   );
   const [positionId, setPositionId] = useState(employee.position?.id ?? "");
   const [rankId, setRankId] = useState(employee.rank?.id ?? "");
+  const [gameName, setGameName] = useState(employee.gameName);
+  const [discordUserId, setDiscordUserId] = useState(
+    employee.discordUserId ?? "",
+  );
+  const [discordDisplayName, setDiscordDisplayName] = useState(
+    employee.discordDisplayName ?? "",
+  );
+  const [active, setActive] = useState(employee.active);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   async function save() {
     setSaving(true);
     try {
       await onSave(employee.id, {
+        gameName,
+        discordUserId: discordUserId || null,
+        discordDisplayName: discordDisplayName || null,
+        active,
         departmentId: departmentId || null,
         positionId: positionId || null,
-        ...(rankId ? { rankId } : {}),
+        rankId: rankId || null,
       });
+    } catch (reason) {
+      setFormError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось сохранить изменения",
+      );
     } finally {
       setSaving(false);
     }
@@ -1670,6 +2045,30 @@ function EmployeeProfile({
               </dl>
               <div className="editor">
                 <label>
+                  Игровое имя
+                  <input
+                    value={gameName}
+                    onChange={(event) => setGameName(event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Discord ID
+                  <input
+                    value={discordUserId}
+                    onChange={(event) => setDiscordUserId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Отображаемое имя Discord
+                  <input
+                    value={discordDisplayName}
+                    onChange={(event) =>
+                      setDiscordDisplayName(event.target.value)
+                    }
+                  />
+                </label>
+                <label>
                   Подразделение
                   <select
                     value={departmentId}
@@ -1690,11 +2089,13 @@ function EmployeeProfile({
                     onChange={(event) => setPositionId(event.target.value)}
                   >
                     <option value="">Не определена</option>
-                    {dictionary?.positions.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
+                    {dictionary?.positions
+                      .filter((item) => item.active || item.id === positionId)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
                   </select>
                 </label>
                 <label>
@@ -1704,13 +2105,28 @@ function EmployeeProfile({
                     onChange={(event) => setRankId(event.target.value)}
                   >
                     <option value="">Не назначено</option>
-                    {dictionary?.ranks.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
+                    {dictionary?.ranks
+                      .filter((item) => item.active || item.id === rankId)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
                   </select>
                 </label>
+                <label>
+                  Статус
+                  <select
+                    value={active ? "true" : "false"}
+                    onChange={(event) =>
+                      setActive(event.target.value === "true")
+                    }
+                  >
+                    <option value="true">Активен</option>
+                    <option value="false">Архивирован</option>
+                  </select>
+                </label>
+                {formError && <p className="form-error">{formError}</p>}
                 <button
                   className="button"
                   disabled={saving}
@@ -1728,6 +2144,10 @@ function EmployeeProfile({
               />
             </div>
           </div>
+        ) : tab === "История" ? (
+          <ProfileHistory employee={employee} />
+        ) : tab === "Активность" ? (
+          <ProfileActivity employee={employee} />
         ) : (
           <EmptyState
             title={`${tab}: данных пока нет`}
@@ -2157,38 +2577,297 @@ function UnresolvedView({ unresolved, selectEmployee }: any) {
     </>
   );
 }
-function DictionariesView({ dictionary }: any) {
+function ProfileHistory({ employee }: { employee: Employee }) {
+  const ranks = employee.rankHistory ?? [];
+  const positions = employee.positionHistory ?? [];
+  if (!ranks.length && !positions.length)
+    return (
+      <EmptyState
+        title="История пока отсутствует"
+        text="Назначения звания, должности и подразделения будут отображаться здесь."
+      />
+    );
+  return (
+    <div className="profile-grid">
+      <article>
+        <PanelTitle eyebrow="ЗВАНИЯ" title="История званий" />
+        {ranks.map((item) => (
+          <p className="history-row" key={item.id}>
+            <b>{item.rank.name}</b>
+            <span>
+              {new Date(item.assignedAt).toLocaleDateString("ru-RU")}
+              {item.removedAt
+                ? ` — ${new Date(item.removedAt).toLocaleDateString("ru-RU")}`
+                : " — настоящее время"}
+            </span>
+          </p>
+        ))}
+      </article>
+      <article>
+        <PanelTitle eyebrow="НАЗНАЧЕНИЯ" title="Должности и подразделения" />
+        {positions.map((item) => (
+          <p className="history-row" key={item.id}>
+            <b>{item.position?.name ?? item.positionRaw}</b>
+            <span>
+              {item.department?.code ?? "Без подразделения"} ·{" "}
+              {new Date(item.detectedAt).toLocaleDateString("ru-RU")}
+            </span>
+          </p>
+        ))}
+      </article>
+    </div>
+  );
+}
+function ProfileActivity({ employee }: { employee: Employee }) {
+  const events = employee.events ?? [];
+  if (!events.length)
+    return (
+      <EmptyState
+        title="Нет событий"
+        text="Авторизованная активность сотрудника появится после импорта или ручного добавления."
+      />
+    );
+  return (
+    <DataTable>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Вид активности</th>
+          <th>Количество</th>
+        </tr>
+      </thead>
+      <tbody>
+        {events.map((event) => (
+          <tr key={event.id}>
+            <td>{new Date(event.occurredAt).toLocaleString("ru-RU")}</td>
+            <td>{event.activityType.name}</td>
+            <td>{event.quantity}</td>
+          </tr>
+        ))}
+      </tbody>
+    </DataTable>
+  );
+}
+function DictionariesView({
+  dictionary,
+  saveDictionary,
+}: {
+  dictionary: Dictionary | null;
+  saveDictionary: (
+    kind: DictionaryKind,
+    id: string | null,
+    values: Record<string, unknown>,
+  ) => Promise<void>;
+}) {
+  const [kind, setKind] = useState<DictionaryKind>("departments");
+  const [editing, setEditing] = useState<any | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const items = dictionary?.[kind] ?? [];
+  const title =
+    kind === "departments"
+      ? "Подразделения"
+      : kind === "positions"
+        ? "Должности"
+        : "Звания";
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const values = Object.fromEntries(form.entries());
+    try {
+      await saveDictionary(kind, editing?.id ?? null, {
+        ...values,
+        active: form.get("active") === "true",
+        sortOrder: Number(form.get("sortOrder") || 0),
+      });
+      setEditing(null);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось сохранить значение",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <>
       <PageHeader
         title="Справочники"
-        subtitle="Виды активности, подразделения, должности и звания"
+        subtitle="Подразделения, должности и звания"
+        action={
+          <button
+            className="button"
+            onClick={() => setEditing({ active: true, sortOrder: 0 })}
+          >
+            + Добавить
+          </button>
+        }
       />
-      <section className="dictionary-grid">
-        {[
-          ["Виды активности", dictionary?.activityTypes, "name"],
-          ["Подразделения", dictionary?.departments, "code"],
-          ["Должности", dictionary?.positions, "name"],
-          ["Звания", dictionary?.ranks, "name"],
-        ].map(([title, data, field]: any) => (
-          <article className="panel" key={title}>
-            <PanelTitle eyebrow="СПРАВОЧНИК" title={title} />
-            <ul className="dictionary-list">
-              {data?.slice(0, 8).map((item: any) => (
-                <li key={item.id}>
-                  {item[field]}
-                  <span>{item.name !== item[field] ? item.name : ""}</span>
-                </li>
-              ))}
-            </ul>
-            {!data?.length && (
-              <EmptyState
-                title="Нет записей"
-                text="Данные будут доступны после настройки справочника."
+      <div className="tabs profile-tabs">
+        {(["departments", "positions", "ranks"] as DictionaryKind[]).map(
+          (value) => (
+            <button
+              key={value}
+              className={kind === value ? "selected" : ""}
+              onClick={() => {
+                setKind(value);
+                setEditing(null);
+                setError("");
+              }}
+            >
+              {value === "departments"
+                ? "Подразделения"
+                : value === "positions"
+                  ? "Должности"
+                  : "Звания"}
+            </button>
+          ),
+        )}
+      </div>
+      {editing && (
+        <section className="panel form-panel">
+          <div className="detail-toolbar">
+            <PanelTitle
+              eyebrow="СПРАВОЧНИК"
+              title={`${editing.id ? "Изменить" : "Создать"}: ${title}`}
+            />
+            <button className="link-button" onClick={() => setEditing(null)}>
+              Закрыть
+            </button>
+          </div>
+          <form className="editor dictionary-form" onSubmit={submit}>
+            <label>
+              Название
+              <input
+                name="name"
+                required
+                maxLength={120}
+                defaultValue={editing.name ?? ""}
+                autoFocus
               />
+            </label>
+            {kind === "departments" && (
+              <label>
+                Код
+                <input
+                  name="code"
+                  required
+                  maxLength={32}
+                  defaultValue={editing.code ?? ""}
+                />
+              </label>
             )}
-          </article>
-        ))}
+            {kind !== "departments" && (
+              <label>
+                Краткое название
+                <input
+                  name="shortName"
+                  maxLength={32}
+                  defaultValue={editing.shortName ?? ""}
+                />
+              </label>
+            )}
+            <label>
+              Порядок
+              <input
+                name="sortOrder"
+                type="number"
+                defaultValue={editing.sortOrder ?? 0}
+              />
+            </label>
+            <label>
+              Статус
+              <select
+                name="active"
+                defaultValue={String(editing.active ?? true)}
+              >
+                <option value="true">Активен</option>
+                <option value="false">Архивирован</option>
+              </select>
+            </label>
+            {error && <p className="form-error">{error}</p>}
+            <div className="row-actions">
+              <button className="button" disabled={saving}>
+                {saving ? "Сохранение..." : "Сохранить"}
+              </button>
+              {editing.id && editing.active && (
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Архивировать «${editing.name}»? Связанные записи сохранятся.`,
+                      )
+                    )
+                      void saveDictionary(kind, editing.id, {
+                        name: editing.name,
+                        code: editing.code,
+                        shortName: editing.shortName,
+                        sortOrder: editing.sortOrder ?? 0,
+                        active: false,
+                      })
+                        .then(() => setEditing(null))
+                        .catch((reason) => setError(reason.message));
+                  }}
+                >
+                  Архивировать
+                </button>
+              )}
+            </div>
+          </form>
+        </section>
+      )}
+      <section className="panel">
+        <PanelTitle eyebrow="СПРАВОЧНИК" title={title} />
+        <DataTable>
+          <thead>
+            <tr>
+              <th>Название</th>
+              {kind === "departments" && <th>Код</th>}
+              <th>Порядок</th>
+              <th>Статус</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item: any) => (
+              <tr key={item.id}>
+                <td>
+                  <strong>{item.name}</strong>
+                  {item.shortName && (
+                    <small className="subline">{item.shortName}</small>
+                  )}
+                </td>
+                {kind === "departments" && <td>{item.code}</td>}
+                <td>{item.sortOrder ?? 0}</td>
+                <td>
+                  <Badge tone={item.active ? "good" : "neutral"}>
+                    {item.active ? "Активен" : "Архивирован"}
+                  </Badge>
+                </td>
+                <td>
+                  <button
+                    className="link-button"
+                    onClick={() => setEditing(item)}
+                  >
+                    Изменить
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+        {!items.length && (
+          <EmptyState
+            title="Нет записей"
+            text="Создайте первое значение справочника."
+          />
+        )}
       </section>
     </>
   );
