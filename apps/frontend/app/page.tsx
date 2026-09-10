@@ -948,6 +948,11 @@ function MaterialsView({
       return null;
     }
   };
+  const previewText = (html: string) => {
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const text = (document.body.textContent ?? "").replace(/\s+/g, " ").trim();
+    return text.length > 220 ? `${text.slice(0, 217).trimEnd()}...` : text;
+  };
   function applyFormat(command: string, value?: string) {
     document.execCommand(command, false, value);
     document.querySelector<HTMLElement>("[data-material-editor]")?.focus();
@@ -1051,7 +1056,7 @@ function MaterialsView({
           {shown.map((material) => (
             <article className={material.active ? "material-card" : "material-card archived"} key={material.id}>
               <div className="material-meta"><Badge tone={material.isPublic ? "good" : "warn"}>{material.isPublic ? "Общий доступ" : material.department?.code ?? "Подразделение"}</Badge>{!material.active && <Badge tone="danger">Архив</Badge>}</div>
-               <button className="material-open" onClick={() => setReading(material)}><h2>{material.title}</h2><p>{material.body}</p></button>
+                <button className="material-open" onClick={() => setReading(material)}><h2>{material.title}</h2><p>{previewText(material.body)}</p></button>
                {material.attachments?.length ? <div className="attachment-summary">Вложений: {material.attachments.length}</div> : null}
                <div className="material-actions">
                  <button className="link-button" onClick={() => setReading(material)}>Читать</button>
