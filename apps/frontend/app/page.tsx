@@ -128,6 +128,7 @@ type Material = {
     url: string;
   }[];
 };
+type ManagedUser = { id: string; username: string; role: User["role"]; employeeId?: string | null; disabledAt?: string | null; createdAt: string; employee?: { id: string; gameName: string; department?: { id: string; name: string; code: string } | null } | null };
 function formatBytes(sizeBytes: number) {
   if (sizeBytes < 1024) return `${sizeBytes} Б`;
   if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} КБ`;
@@ -345,6 +346,7 @@ export default function Home() {
   const [sources, setSources] = useState<Source[]>([]);
   const [dictionary, setDictionary] = useState<Dictionary | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(false);
   const [scanNote, setScanNote] = useState("");
@@ -464,6 +466,11 @@ export default function Home() {
       }
       if (next === "dictionaries")
         setDictionary(await fetchJson<Dictionary>("/api/dictionaries"));
+      if (next === "users") {
+        const [usersValue, employeeValue] = await Promise.all([fetchJson<ManagedUser[]>("/api/admin/users"), fetchJson<{ items: Employee[] }>("/api/employees?take=200&active=all")]);
+        setManagedUsers(usersValue);
+        setEmployees(employeeValue.items);
+      }
       if (next === "materials") {
         const [materialValue, dictionaryValue] = await Promise.all([
           fetchJson<Material[]>(isAdmin ? "/api/admin/materials" : "/api/materials"),
@@ -659,6 +666,11 @@ export default function Home() {
       );
     await loadView("materials");
   }
+  async function saveUser(id: string | null, values: Record<string, unknown>) {
+    const response = await fetch(`${api}/api/admin/users${id ? `/${id}` : ""}`, { method: id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values), credentials: "include" });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({ message: "Не удалось сохранить пользователя" }))).message);
+    await loadView("users");
+  }
   if (!authenticated)
     return (
       <main className="login-page">
@@ -800,7 +812,8 @@ export default function Home() {
               employeeTotal,
               sources,
               dictionary,
-              materials,
+               materials,
+               managedUsers,
               review,
               updateSource,
               selectEmployee: openEmployee,
@@ -823,7 +836,8 @@ export default function Home() {
               unresolved,
               activityDetails,
                role: user?.role ?? "EMPLOYEE",
-              saveMaterial,
+               saveMaterial,
+               saveUser,
             })
           )}
         </main>
@@ -864,6 +878,8 @@ function renderView(props: {
   role: User["role"];
   materials: Material[];
   saveMaterial: (id: string | null, values: Record<string, unknown>) => Promise<void>;
+  managedUsers: ManagedUser[];
+  saveUser: (id: string | null, values: Record<string, unknown>) => Promise<void>;
   unresolved: {
     users: {
       authorRaw: string;
@@ -897,6 +913,7 @@ function renderView(props: {
   if (props.view === "unresolved") return <UnresolvedView {...props} />;
   if (props.view === "dictionaries") return <DictionariesView {...props} />;
   if (props.view === "materials") return <MaterialsView {...props} />;
+  if (props.view === "users") return <UsersView users={props.managedUsers} employees={props.employees} saveUser={props.saveUser} />;
   const titles: Record<string, [string, string]> = {
     training: ["Обучение", "Тесты, аттестации и результаты обучения"],
     materials: ["Материалы", "Справочные и методические материалы"],
@@ -916,6 +933,25 @@ function renderView(props: {
       </section>
     </>
   );
+}
+
+function UsersView({ users, employees, saveUser }: { users: ManagedUser[]; employees: Employee[]; saveUser: (id: string | null, values: Record<string, unknown>) => Promise<void> }) {
+  const [editing, setEditing] = useState<ManagedUser | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const role = String(form.get("role")) as User["role"];
+    const values: Record<string, unknown> = { username: String(form.get("username") ?? ""), role, employeeId: role === "ADMIN" ? null : String(form.get("employeeId") ?? "") || null, disabled: form.get("disabled") === "true" };
+    const password = String(form.get("password") ?? "");
+    if (password) values.password = password;
+    setError("");
+    try { await saveUser(editing?.id ?? null, values); setEditing(null); setCreating(false); } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось сохранить пользователя."); }
+  }
+  return <><PageHeader title="Пользователи" subtitle="Учетные записи, роли и связь с сотрудниками" action={<button className="button" onClick={() => { setCreating(true); setEditing(null); setError(""); }}>Добавить пользователя</button>} />
+    {(creating || editing) && <section className="panel form-panel"><PanelTitle eyebrow="УЧЕТНАЯ ЗАПИСЬ" title={editing ? "Изменить пользователя" : "Новый пользователь"} /><form className="editor" onSubmit={submit}><label>Логин<input name="username" required minLength={3} maxLength={128} defaultValue={editing?.username ?? ""} /></label><label>{editing ? "Новый пароль (оставьте пустым, чтобы не менять)" : "Пароль"}<input name="password" type="password" required={!editing} minLength={10} maxLength={128} /></label><label>Роль<select name="role" defaultValue={editing?.role ?? "EMPLOYEE"}><option value="EMPLOYEE">Сотрудник подразделения</option><option value="LEADER">Руководитель подразделения</option><option value="ADMIN">Администратор</option></select></label><label>Карточка сотрудника<select name="employeeId" defaultValue={editing?.employeeId ?? ""}><option value="">Не назначена</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.gameName}{employee.department ? ` · ${employee.department.code}` : ""}</option>)}</select></label>{editing && <label>Статус<select name="disabled" defaultValue={String(Boolean(editing.disabledAt))}><option value="false">Активен</option><option value="true">Заблокирован</option></select></label>}<div className="form-actions"><button className="button" type="submit">Сохранить</button><button className="button secondary" type="button" onClick={() => { setEditing(null); setCreating(false); }}>Отмена</button></div>{error && <p className="form-error">{error}</p>}<p className="muted">Руководителю и сотруднику обязательно назначьте карточку сотрудника. При изменении роли, пароля или статуса все действующие сеансы отзываются.</p></form></section>}
+    <section className="panel"><PanelTitle eyebrow="ДОСТУП" title="Учетные записи портала" /><DataTable><thead><tr><th>Логин</th><th>Роль</th><th>Сотрудник</th><th>Подразделение</th><th>Статус</th><th /></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td><strong>{user.username}</strong></td><td><Badge tone={user.role === "ADMIN" ? "danger" : user.role === "LEADER" ? "warn" : "good"}>{user.role === "ADMIN" ? "Администратор" : user.role === "LEADER" ? "Руководитель" : "Сотрудник"}</Badge></td><td>{user.employee?.gameName ?? "Не назначен"}</td><td>{user.employee?.department?.code ?? "—"}</td><td><Badge tone={user.disabledAt ? "danger" : "good"}>{user.disabledAt ? "Заблокирован" : "Активен"}</Badge></td><td><button className="link-button" onClick={() => { setEditing(user); setCreating(false); setError(""); }}>Изменить</button></td></tr>)}</tbody></DataTable>{!users.length && <EmptyState title="Нет учетных записей" text="Создайте первую учетную запись для сотрудника или руководителя." />}</section></>;
 }
 
 function MaterialsView({

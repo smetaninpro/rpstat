@@ -29,6 +29,7 @@ import {
   Min,
 } from "class-validator";
 import { MessageStatus, Prisma, Role } from "@prisma/client";
+import * as argon2 from "argon2";
 import { CurrentUser, RoleGuard, Roles, SessionGuard } from "./auth";
 import { PrismaService } from "./prisma.service";
 import { parseDiscordNickname } from "./discord-nickname";
@@ -74,6 +75,13 @@ class MaterialDto {
   @IsOptional() @IsString() departmentId?: string | null;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() attachments?: { fileName: string; mimeType: string; dataBase64: string }[];
+}
+class UserDto {
+  @IsString() @Length(3, 128) username!: string;
+  @IsOptional() @IsString() @Length(10, 128) password?: string;
+  @IsEnum(Role) role!: Role;
+  @IsOptional() @IsString() employeeId?: string | null;
+  @IsOptional() @IsBoolean() disabled?: boolean;
 }
 class PaginationDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) take = 25;
@@ -308,6 +316,35 @@ export class PortalService {
     const scope = await this.materialWhere(user);
     if (user.role !== Role.ADMIN && !(attachment.material.isPublic || ("OR" in scope && (scope as any).OR.some((entry: any) => entry.departmentId === attachment.material.departmentId)))) throw new NotFoundException("Вложение не найдено");
     return { attachment, bytes: await readFile(join(this.materialFilesPath, attachment.storageKey)) };
+  }
+  async users() {
+    return this.prisma.user.findMany({ select: { id: true, username: true, email: true, role: true, employeeId: true, disabledAt: true, createdAt: true, employee: { select: { id: true, gameName: true, department: { select: { id: true, name: true, code: true } } } } }, orderBy: { username: "asc" } });
+  }
+  private async validateUser(dto: UserDto, excludeId?: string) {
+    if (!/^[a-zA-Z0-9_.-]{3,128}$/.test(dto.username)) throw new BadRequestException("Логин может содержать только латинские буквы, цифры, точку, дефис и подчеркивание");
+    if (dto.password !== undefined && (dto.password.length < 10 || dto.password.length > 128)) throw new BadRequestException("Пароль должен содержать от 10 до 128 символов");
+    if (dto.role !== Role.ADMIN && !dto.employeeId) throw new BadRequestException("Для руководителя и сотрудника нужно назначить карточку сотрудника");
+    if (dto.employeeId && !(await this.prisma.employee.findUnique({ where: { id: dto.employeeId } }))) throw new BadRequestException("Сотрудник не найден");
+    const duplicate = await this.prisma.user.findFirst({ where: { OR: [{ username: dto.username }, ...(dto.employeeId ? [{ employeeId: dto.employeeId }] : [])], ...(excludeId ? { id: { not: excludeId } } : {}) } });
+    if (duplicate) throw new BadRequestException(duplicate.username === dto.username ? "Этот логин уже занят" : "Карточка сотрудника уже привязана к другой учетной записи");
+  }
+  async createUser(dto: UserDto, actorId: string) {
+    if (!dto.password) throw new BadRequestException("Укажите пароль для новой учетной записи");
+    await this.validateUser(dto);
+    const user = await this.prisma.user.create({ data: { username: dto.username, passwordHash: await argon2.hash(dto.password, { type: argon2.argon2id }), role: dto.role, employeeId: dto.role === Role.ADMIN ? null : dto.employeeId! }, select: { id: true, username: true, role: true, employeeId: true, disabledAt: true } });
+    await this.prisma.auditLog.create({ data: { userId: actorId, action: "USER_CREATED", entityType: "User", entityId: user.id, newValue: { username: user.username, role: user.role, employeeId: user.employeeId } } });
+    return user;
+  }
+  async updateUser(id: string, dto: UserDto, actorId: string) {
+    const current = await this.prisma.user.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException("Пользователь не найден");
+    await this.validateUser(dto, id);
+    const data: Prisma.UserUpdateInput = { username: dto.username, role: dto.role, employee: dto.role === Role.ADMIN ? { disconnect: true } : { connect: { id: dto.employeeId! } }, disabledAt: dto.disabled ? new Date() : null };
+    if (dto.password) data.passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const user = await this.prisma.user.update({ where: { id }, data, select: { id: true, username: true, role: true, employeeId: true, disabledAt: true } });
+    await this.prisma.session.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+    await this.prisma.auditLog.create({ data: { userId: actorId, action: "USER_UPDATED", entityType: "User", entityId: id, oldValue: { username: current.username, role: current.role, employeeId: current.employeeId, disabled: Boolean(current.disabledAt) }, newValue: { username: user.username, role: user.role, employeeId: user.employeeId, disabled: Boolean(user.disabledAt) } } });
+    return user;
   }
   async activityDetails(
     period: "week" | "month",
@@ -1183,6 +1220,9 @@ export class PortalController {
   @Patch("admin/materials/:id") @Roles(Role.ADMIN) updateMaterial(@Param("id") id: string, @Body() dto: MaterialDto, @CurrentUser() user: { id: string }) { return this.portal.updateMaterial(id, dto, user.id); }
   @Patch("materials/:id") @Roles(Role.LEADER) updateLeaderMaterial(@Param("id") id: string, @Body() dto: MaterialDto, @CurrentUser() user: { id: string; role: Role; employeeId: string | null }) { return this.portal.updateLeaderMaterial(id, dto, user); }
   @Get("materials/attachments/:id") @Roles(Role.EMPLOYEE, Role.LEADER, Role.ADMIN) async attachment(@Param("id") id: string, @CurrentUser() user: { role: Role; employeeId: string | null }, @Res() response: Response) { const { attachment, bytes } = await this.portal.attachment(id, user); response.setHeader("Content-Type", attachment.mimeType); response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`); response.setHeader("X-Content-Type-Options", "nosniff"); response.send(bytes); }
+  @Get("admin/users") @Roles(Role.ADMIN) users() { return this.portal.users(); }
+  @Post("admin/users") @Roles(Role.ADMIN) createUser(@Body() dto: UserDto, @CurrentUser() user: { id: string }) { return this.portal.createUser(dto, user.id); }
+  @Patch("admin/users/:id") @Roles(Role.ADMIN) updateUser(@Param("id") id: string, @Body() dto: UserDto, @CurrentUser() user: { id: string }) { return this.portal.updateUser(id, dto, user.id); }
   @Get("leadership/analytics")
   @Roles(Role.LEADER, Role.ADMIN)
   leadershipAnalytics(
