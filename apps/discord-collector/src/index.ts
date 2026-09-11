@@ -110,4 +110,3 @@ async function cycle() {
 }
 
 void cycle();
-setInterval(() => void cycle(), 60000);
