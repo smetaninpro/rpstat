@@ -4,4 +4,4 @@ COPY package*.json ./
 COPY apps/discord-collector/package.json apps/discord-collector/package.json
 RUN npm install
 COPY apps/discord-collector apps/discord-collector
-CMD ["sh", "-c", "rm -f /data/discord-profile/SingletonLock /data/discord-profile/SingletonCookie /data/discord-profile/SingletonSocket; Xvfb :99 -screen 0 1440x900x24 -nolisten tcp & export DISPLAY=:99; sleep 1; exec npm run start --workspace=@rmrp/discord-collector"]
+CMD ["sh", "-c", "rm -f /data/discord-profile/SingletonLock /data/discord-profile/SingletonCookie /data/discord-profile/SingletonSocket /tmp/.X99-lock; Xvfb :99 -screen 0 1440x900x24 -nolisten tcp & xvfb_pid=$!; trap 'kill $xvfb_pid 2>/dev/null; wait $xvfb_pid 2>/dev/null' EXIT INT TERM; export DISPLAY=:99; sleep 1; npm run start --workspace=@rmrp/discord-collector"]
