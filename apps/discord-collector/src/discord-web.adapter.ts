@@ -19,7 +19,7 @@ export class DiscordWebAdapter {
   async start(headless = true) {
     this.context = await chromium.launchPersistentContext(
       "/data/discord-profile",
-      { headless },
+      { headless: process.env.DISCORD_HEADED === "true" ? false : headless, viewport: { width: 1440, height: 900 }, locale: "ru", timezoneId: "Europe/Moscow" },
     );
   }
   async stop() {

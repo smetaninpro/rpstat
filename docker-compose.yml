@@ -60,6 +60,7 @@ services:
     env_file: .env
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
+      DISCORD_HEADED: "true"
     volumes:
       - discord-profile:/data/discord-profile
     depends_on:
