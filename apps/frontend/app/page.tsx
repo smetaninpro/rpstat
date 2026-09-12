@@ -682,8 +682,11 @@ export default function Home() {
             <br />
             управления.
           </h1>
-          <span>Внутренний портал организации</span>
-        </section>
+           <span>Внутренний портал организации</span>
+           <a className="login-download" href="/RMRP-Assistant-1.7.0.zip" download>
+             Скачать RMRP Assistant
+           </a>
+         </section>
         <form className="login-card" onSubmit={login}>
           <p className="eyebrow">ЗАЩИЩЕННЫЙ ВХОД</p>
           <h2>Авторизация</h2>

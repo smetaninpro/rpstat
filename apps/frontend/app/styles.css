@@ -131,6 +131,8 @@ dl { display: grid; grid-template-columns: 130px 1fr; gap: 12px; font-size: 12px
 .login-brand p { font: 12px 'IBM Plex Mono', monospace; color: #93a5c7; letter-spacing: .15em; }
 .login-brand h1 { font-size: clamp(55px, 8vw, 110px); line-height: .88; letter-spacing: -.07em; margin: 20px 0; }
 .login-brand > span { color: #7f8ca0; }
+.login-download { display: inline-flex; margin-top: 24px; width: fit-content; border: 1px solid #6989ef; border-radius: 7px; background: #263d86; color: #f0f4ff; padding: 11px 14px; font-size: 12px; font-weight: 800; text-decoration: none; }
+.login-download:hover, .login-download:focus-visible { background: #3452ad; color: #fff; outline: none; }
 .login-card { background: #171e29; border: 1px solid #303b4d; padding: 32px; border-radius: 10px; display: grid; gap: 15px; max-width: 390px; }
 .login-card h2 { margin: 0 0 8px; }
 .login-card label { font-size: 12px; color: #aeb9ca; display: grid; gap: 7px; }
