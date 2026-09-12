@@ -769,6 +769,9 @@ export default function Home() {
           </button>
           {user?.role !== "EMPLOYEE" && <span className="topbar-context">{user?.role === "LEADER" ? "Данные вашего подразделения" : "Панель управления"}</span>}
           <div className="top-actions">
+            <a className="assistant-download" href="/RMRP-Assistant-1.7.0.zip" download>
+              Скачать RMRP Assistant
+            </a>
             <div className="identity">
               <div>{user?.username?.[0]?.toUpperCase() ?? "?"}</div>
               <span>
