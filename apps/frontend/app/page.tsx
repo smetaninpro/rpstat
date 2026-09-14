@@ -220,7 +220,6 @@ const nav: { view: View; label: string; glyph: string; roles: User["role"][] }[]
   { view: "statistics-activity", label: "Отчет: активность", glyph: "◈", roles: ["ADMIN", "LEADER"] },
   { view: "statistics-sources", label: "Источники отчета", glyph: "⌁", roles: ["ADMIN", "LEADER"] },
   { view: "materials", label: "Материалы", glyph: "▤", roles: ["EMPLOYEE", "LEADER", "ADMIN"] },
-  { view: "integrations", label: "Интеграции", glyph: "⌁", roles: ["ADMIN"] },
   { view: "review", label: "Проверка данных", glyph: "!", roles: ["ADMIN"] },
   { view: "unresolved", label: "Неразобрано", glyph: "?", roles: ["ADMIN"] },
   { view: "dictionaries", label: "Справочники", glyph: "◇", roles: ["ADMIN"] },
