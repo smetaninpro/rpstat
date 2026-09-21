@@ -25,8 +25,6 @@ button { cursor: pointer; }
 .global-search { width: min(540px, 60%); height: 38px; border: 1px solid var(--line); background: #151b25; border-radius: 7px; display: flex; align-items: center; gap: 10px; padding: 0 12px; color: #6f7d92; }
 .global-search input { border: 0; background: transparent; outline: 0; color: var(--text); width: 100%; font-size: 13px; }
 .top-actions { margin-left: auto; display: flex; align-items: center; gap: 18px; }
-.assistant-download { border: 1px solid #5470d7; border-radius: 7px; background: #202f66; color: #e6ecff; padding: 8px 11px; font-size: 11px; font-weight: 800; text-decoration: none; white-space: nowrap; }
-.assistant-download:hover, .assistant-download:focus-visible { background: #2c4190; color: #fff; outline: none; }
 .topbar-context { color: var(--muted); font-size: 12px; }
 .bell, .menu-button { border: 0; background: transparent; color: #aebbd0; font-size: 20px; }
 .identity > div, .avatar { width: 30px; height: 30px; border-radius: 50%; font-size: 12px; }
@@ -131,8 +129,6 @@ dl { display: grid; grid-template-columns: 130px 1fr; gap: 12px; font-size: 12px
 .login-brand p { font: 12px 'IBM Plex Mono', monospace; color: #93a5c7; letter-spacing: .15em; }
 .login-brand h1 { font-size: clamp(55px, 8vw, 110px); line-height: .88; letter-spacing: -.07em; margin: 20px 0; }
 .login-brand > span { color: #7f8ca0; }
-.login-download { display: inline-flex; margin-top: 24px; width: fit-content; border: 1px solid #6989ef; border-radius: 7px; background: #263d86; color: #f0f4ff; padding: 11px 14px; font-size: 12px; font-weight: 800; text-decoration: none; }
-.login-download:hover, .login-download:focus-visible { background: #3452ad; color: #fff; outline: none; }
 .login-card { background: #171e29; border: 1px solid #303b4d; padding: 32px; border-radius: 10px; display: grid; gap: 15px; max-width: 390px; }
 .login-card h2 { margin: 0 0 8px; }
 .login-card label { font-size: 12px; color: #aeb9ca; display: grid; gap: 7px; }
@@ -141,4 +137,4 @@ dl { display: grid; grid-template-columns: 130px 1fr; gap: 12px; font-size: 12px
 .menu-button { display: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, 1fr); } .sidebar { position: fixed; transform: translateX(-100%); transition: transform .2s; } .sidebar.open { transform: translateX(0); box-shadow: 20px 0 40px #0008; } .menu-button { display: block; } .content { padding: 25px; } .topbar { padding: 0 20px; } .dashboard-grid { grid-template-columns: 1fr; } .chart-panel { min-height: 330px; } }
-@media (max-width: 650px) { .topbar { gap: 8px; height: 58px; } .global-search { width: auto; flex: 1; } .top-actions { gap: 8px; } .assistant-download { padding: 7px 8px; font-size: 10px; } .top-actions .bell, .identity small { display: none; } .identity b { font-size: 10px; } .content { padding: 18px; } .page-header { align-items: flex-start; flex-direction: column; } .page-header h1 { font-size: 26px; } .metrics, .dictionary-grid, .profile-grid { grid-template-columns: 1fr; } .metric { min-height: 100px; } .collector-warning, .collector-card { align-items: flex-start; flex-direction: column; } .login-page { grid-template-columns: 1fr; padding: 35px 24px; gap: 50px; } .login-brand h1 { font-size: 62px; } .login-card { max-width: none; } }
+@media (max-width: 650px) { .topbar { gap: 8px; height: 58px; } .global-search { width: auto; flex: 1; } .top-actions .bell, .identity small { display: none; } .identity b { font-size: 10px; } .content { padding: 18px; } .page-header { align-items: flex-start; flex-direction: column; } .page-header h1 { font-size: 26px; } .metrics, .dictionary-grid, .profile-grid { grid-template-columns: 1fr; } .metric { min-height: 100px; } .collector-warning, .collector-card { align-items: flex-start; flex-direction: column; } .login-page { grid-template-columns: 1fr; padding: 35px 24px; gap: 50px; } .login-brand h1 { font-size: 62px; } .login-card { max-width: none; } }
