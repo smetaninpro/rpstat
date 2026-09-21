@@ -94,11 +94,32 @@ model ExamAttempt {
   currentQuestion Int @default(0)
   questionStartedAt DateTime @default(now())
   answers Json @default("[]")
+  questionOrder Json @default("[]")
   score Int?
   startedAt DateTime @default(now())
   completedAt DateTime?
   admission ExamAdmission @relation(fields: [admissionId], references: [id], onDelete: Cascade)
   @@index([admissionId, status])
+}
+
+model ExamQuestion {
+  id String @id @default(uuid())
+  text String @db.Text
+  active Boolean @default(true)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  options ExamQuestionOption[]
+}
+
+model ExamQuestionOption {
+  id String @id @default(uuid())
+  questionId String
+  text String @db.Text
+  correct Boolean @default(false)
+  sortOrder Int @default(0)
+  question ExamQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  @@index([questionId, sortOrder])
 }
 
 model Session {
