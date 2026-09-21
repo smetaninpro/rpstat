@@ -56,6 +56,11 @@ enum ScanRequestStatus {
   COMPLETED
   FAILED
 }
+enum ExamStatus {
+  IN_PROGRESS
+  COMPLETED
+  TERMINATED
+}
 
 model User {
   id String @id @default(uuid())
@@ -69,6 +74,31 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sessions Session[]
+}
+
+model ExamAdmission {
+  id String @id @default(uuid())
+  firstName String
+  lastName String
+  examCode String @unique
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  attempts ExamAttempt[]
+  @@index([lastName, firstName])
+}
+
+model ExamAttempt {
+  id String @id @default(uuid())
+  admissionId String
+  status ExamStatus @default(IN_PROGRESS)
+  currentQuestion Int @default(0)
+  questionStartedAt DateTime @default(now())
+  answers Json @default("[]")
+  score Int?
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  admission ExamAdmission @relation(fields: [admissionId], references: [id], onDelete: Cascade)
+  @@index([admissionId, status])
 }
 
 model Session {

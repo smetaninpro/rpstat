@@ -10,7 +10,7 @@ async function bootstrap() {
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cookieParser());
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.path.startsWith('/api/internal/') && req.path !== '/api/auth/login') {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.path.startsWith('/api/internal/') && req.path !== '/api/auth/login' && !req.path.startsWith('/api/exam/')) {
       const origin = req.get('origin');
       if (origin !== process.env.FRONTEND_ORIGIN || !req.cookies?.rmrp_csrf || req.get('x-csrf-token') !== req.cookies.rmrp_csrf) return res.status(403).json({ error: { code: 'CSRF_REJECTED', message: 'Недействительный запрос' } });
     }
