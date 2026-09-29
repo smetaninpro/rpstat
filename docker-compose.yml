@@ -53,6 +53,19 @@ services:
       retries: 10
     restart: unless-stopped
 
+  discord-bot:
+    build:
+      context: .
+      dockerfile: apps/discord-collector/Dockerfile
+    env_file: .env
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
 networks:
   internal:
     driver: bridge

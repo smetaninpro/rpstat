@@ -1,5 +1,4 @@
 import { createHmac, randomUUID } from "crypto";
-import { DiscordWebAdapter } from "./discord-web.adapter.js";
 
 const baseUrl = process.env.BACKEND_INTERNAL_URL ?? "http://backend:3001";
 const configuredSecret = process.env.COLLECTOR_SHARED_SECRET;
@@ -7,7 +6,8 @@ if (!configuredSecret || Buffer.byteLength(configuredSecret) < 32) {
   throw new Error("COLLECTOR_SHARED_SECRET must be at least 32 bytes");
 }
 const secret: string = configuredSecret;
-let running = false;
+const botToken = process.env.DISCORD_BOT_TOKEN;
+if (!botToken) throw new Error("DISCORD_BOT_TOKEN must be configured");
 
 async function signedFetch(path: string, init: RequestInit = {}) {
   const body = typeof init.body === "string" ? init.body : "";
@@ -35,7 +35,7 @@ async function heartbeat(status: "IDLE" | "DEGRADED", lastError?: string) {
   const response = await signedFetch("/api/internal/collector/heartbeat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "discord-web", version: "0.1.0", status, lastError }),
+    body: JSON.stringify({ name: "discord-bot", version: "0.1.0", status, lastError }),
   });
   if (!response.ok) throw new Error(`Heartbeat failed: ${response.status}`);
 }
@@ -49,11 +49,17 @@ async function fail(requestId: string, error: unknown) {
   });
 }
 
+type DiscordApiMessage = { id: string; content: string; timestamp: string; author: { id: string; username: string; global_name?: string | null }; mentions: { id: string; username: string; global_name?: string | null }[]; attachments: { filename: string; content_type?: string | null; url: string }[] };
+function channelId(url: string) { const match = /^https:\/\/discord\.com\/channels\/(\d+)\/(\d+)$/.exec(url); if (!match) throw new Error("Invalid configured Discord channel URL"); return { guildId: match[1], channelId: match[2] }; }
+async function readMessages(source: Source, cutoff: Date, limit: number) {
+  const ids = channelId(source.channelUrl);
+  const response = await fetch(`https://discord.com/api/v10/channels/${ids.channelId}/messages?limit=${Math.min(limit, 100)}`, { headers: { Authorization: `Bot ${botToken}` } });
+  if (!response.ok) throw new Error(`Discord API read failed for ${source.name}: ${response.status}`);
+  const raw = await response.json() as DiscordApiMessage[];
+  return raw.filter((message) => new Date(message.timestamp) >= cutoff).slice(0, limit).map((message) => ({ source: "discord-bot", guildId: ids.guildId, channelId: ids.channelId, messageId: message.id, author: { discordUserId: message.author.id, displayName: message.author.global_name ?? message.author.username }, mentions: message.mentions.map((mention) => ({ discordUserId: mention.id, displayName: mention.global_name ?? mention.username })), text: message.content, timestamp: message.timestamp, collectedAt: new Date().toISOString(), attachments: message.attachments.map((attachment) => ({ filename: attachment.filename, contentType: attachment.content_type ?? undefined, url: attachment.url })) }));
+}
 async function cycle() {
-  if (running) return;
-  running = true;
   let request: ScanRequest | null = null;
-  let adapter: DiscordWebAdapter | undefined;
   try {
     const claim = await signedFetch("/api/internal/collector/scan-requests/claim", {
       method: "POST",
@@ -75,16 +81,9 @@ async function cycle() {
     const sources = scanRequest.sourceId
       ? config.sources.filter((source) => source.id === scanRequest.sourceId)
       : config.sources;
-    adapter = new DiscordWebAdapter();
-    await adapter.start(true);
-
     const results: { source: string; scanned: number; accepted: number }[] = [];
     for (const source of sources) {
-      const messages = await adapter.readRecentChannel(
-        source.channelUrl,
-        new Date(Date.now() - scanRequest.recentDays * 86400000),
-        scanRequest.limit,
-      );
+      const messages = await readMessages(source, new Date(Date.now() - scanRequest.recentDays * 86400000), scanRequest.limit);
       const response = await signedFetch("/api/internal/integrations/discord/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -103,10 +102,7 @@ async function cycle() {
   } catch (error) {
     if (request) await fail(request.id, error);
     else await heartbeat("DEGRADED", error instanceof Error ? error.message : "Unknown collector error");
-  } finally {
-    await adapter?.stop().catch(() => undefined);
-    running = false;
-  }
+  } finally { /* A bot run has no persistent connection to close. */ }
 }
 
 void cycle();

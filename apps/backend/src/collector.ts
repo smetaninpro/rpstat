@@ -29,7 +29,7 @@ export class CollectorService {
     const source = await this.prisma.discordSource.findUniqueOrThrow({ where: { id: dto.sourceId }, include: { rules: { where: { enabled: true }, orderBy: { priority: 'desc' } } } });
     const cutoff = new Date(Date.now() - (source.lookbackDays ?? 3) * 86400000); const max = Number(process.env.MAX_SEQUENCE_RANGE ?? 30); let accepted = 0;
     for (const message of dto.messages) {
-      if (message.source !== 'discord-web' || message.guildId !== source.guildId || message.channelId !== source.channelId) continue;
+      if (!['discord-web', 'discord-bot'].includes(message.source) || message.guildId !== source.guildId || message.channelId !== source.channelId) continue;
       const timestamp = new Date(message.timestamp); const id = message.messageId ?? null; const fp = fingerprint(message);
       try {
         const stored = await this.prisma.integrationMessage.create({ data: { sourceId: source.id, source: message.source, sourceMessageId: id, guildId: message.guildId, channelId: message.channelId, authorDiscordId: message.author.discordUserId, authorRaw: message.author.displayName, textRaw: message.text, attachments: (message.attachments ?? []) as unknown as Prisma.InputJsonValue, messageTimestamp: timestamp, collectedAt: new Date(message.collectedAt), fingerprint: fp, status: timestamp < cutoff ? 'OUT_OF_WINDOW' : source.parserMode === 'SEQUENCE_RANGE' ? 'UNPARSED' : 'REVIEW_REQUIRED' } });
@@ -39,7 +39,7 @@ export class CollectorService {
         const parsed = parseSequence(message.text, max);
         if (parsed.status !== 'PARSED') { await this.prisma.integrationMessage.update({ where: { id: stored.id }, data: { status: parsed.status, parsedFrom: parsed.from, parsedTo: parsed.to, parsedQuantity: parsed.quantity } }); continue; }
         const nickname = parseDiscordNickname(message.author.displayName);
-        let employee = await this.prisma.employee.findFirst({ where: message.author.discordUserId ? { discordUserId: message.author.discordUserId } : { aliases: { some: { source: 'discord-web', normalizedAlias: message.author.displayName.trim().toLowerCase() } } } });
+        let employee = await this.prisma.employee.findFirst({ where: message.author.discordUserId ? { discordUserId: message.author.discordUserId } : { aliases: { some: { source: { in: ['discord-web', 'discord-bot'] }, normalizedAlias: message.author.displayName.trim().toLowerCase() } } } });
         if (!employee && nickname) employee = await this.createEmployeeFromNickname(message.author, nickname);
         if (employee && nickname) await this.updateEmployeeFromNickname(employee.id, nickname, stored.id);
         const quantity = source.countMode === 'ATTACHMENTS' ? message.attachments?.length ?? 0 : source.countMode === 'LINES' ? message.text.split(/\r?\n/).filter((line) => line.trim()).length : 0;
@@ -75,7 +75,7 @@ export class CollectorService {
       nickname.departmentRaw ? this.prisma.department.findUnique({ where: { code: nickname.departmentRaw } }) : null,
     ]);
     const employee = await this.prisma.employee.create({ data: { gameName: nickname.gameName, discordUserId: author.discordUserId, discordDisplayName: author.displayName, positionRaw: nickname.positionRaw, positionId: positionAlias?.positionId, departmentId: department?.id } });
-    await this.prisma.employeeAlias.create({ data: { employeeId: employee.id, source: 'discord-web', alias: author.displayName, normalizedAlias } });
+    await this.prisma.employeeAlias.create({ data: { employeeId: employee.id, source: 'discord-bot', alias: author.displayName, normalizedAlias } });
     return employee;
   }
   private async processTrainingMessage(messageId: string, sourceId: string, message: RawMessageDto, occurredAt: Date) {
@@ -88,7 +88,7 @@ export class CollectorService {
     const examActivity = await this.prisma.activityType.findUnique({ where: { code: 'EXAM_ACCEPTED' } });
     await this.prisma.$transaction(async (tx) => { const session = await tx.trainingSession.create({ data: { sourceId, integrationMessageId: messageId, instructorEmployeeId: instructor.id, studentEmployeeId: student.id, occurredAt, overallStatus: parsed.result, items: { create: parsed.items.map((item, sortOrder) => ({ ...item, sortOrder })) } } }); await tx.trainingResult.createMany({ data: parsed.items.map((item) => ({ employeeId: student.id, trainingSessionId: session.id, type: item.type, status: item.status, occurredAt })) }); if (examActivity) { const exams = parsed.items.filter((item) => item.type === 'EXAM').length; if (exams) await tx.activityEvent.create({ data: { employeeId: instructor.id, activityTypeId: examActivity.id, quantity: exams, occurredAt, sourceType: 'DISCORD', sourceId, integrationMessageId: messageId } }); } await tx.integrationMessage.update({ where: { id: messageId }, data: { status: 'PARSED' } }); });
   }
-  private findEmployee(mention: AuthorDto) { const normalizedAlias = mention.displayName.replace(/^@/, '').trim().replace(/\s+/g, ' ').toLowerCase(); return this.prisma.employee.findFirst({ where: mention.discordUserId ? { OR: [{ discordUserId: mention.discordUserId }, { aliases: { some: { source: 'discord-web', normalizedAlias } } }] } : { aliases: { some: { source: 'discord-web', normalizedAlias } } } }); }
+  private findEmployee(mention: AuthorDto) { const normalizedAlias = mention.displayName.replace(/^@/, '').trim().replace(/\s+/g, ' ').toLowerCase(); return this.prisma.employee.findFirst({ where: mention.discordUserId ? { OR: [{ discordUserId: mention.discordUserId }, { aliases: { some: { source: { in: ['discord-web', 'discord-bot'] }, normalizedAlias } } }] } : { aliases: { some: { source: { in: ['discord-web', 'discord-bot'] }, normalizedAlias } } } }); }
 }
 @Controller('api/internal')
 export class CollectorController {
