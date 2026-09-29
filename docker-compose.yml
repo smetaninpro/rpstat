@@ -53,43 +53,10 @@ services:
       retries: 10
     restart: unless-stopped
 
-  discord-collector:
-    build:
-      context: .
-      dockerfile: apps/discord-collector/Dockerfile
-    env_file: .env
-    environment:
-      BACKEND_INTERNAL_URL: http://backend:3001
-      DISCORD_HEADED: "true"
-    volumes:
-      - discord-profile:/data/discord-profile
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks: [internal]
-    restart: "no"
-
-  collector-auth:
-    build:
-      context: .
-      dockerfile: apps/discord-collector/Dockerfile.auth
-    env_file: .env
-    environment:
-      BACKEND_INTERNAL_URL: http://backend:3001
-    volumes:
-      - discord-profile:/data/discord-profile
-    ports: ["127.0.0.1:6080:6080"]
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks: [internal]
-    profiles: [auth]
-
 networks:
   internal:
     driver: bridge
 
 volumes:
   postgres-data:
-  discord-profile:
   material-files:

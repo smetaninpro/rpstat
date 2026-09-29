@@ -1,32 +1,36 @@
-# RMRP UFSB Portal
+# Внутренний портал
 
-Local Docker foundation for the RMRP UFSB internal portal. The repository intentionally begins with the first MVP milestone from `RMRP_UFSB_Portal_TZ.md`.
+Веб-портал для сотрудников: учетные записи, материалы, кадровые сведения, отчеты и экзаменационное тестирование.
 
-## Local startup
+## Запуск
 
-1. Copy `.env.example` to `.env` and replace every placeholder secret with a unique random value of 32+ bytes. Set `ALLOWED_DISCORD_GUILD_ID` before creating sources.
-2. Start: `docker compose up -d --build`.
-3. Apply the initial database migration: `docker compose exec backend npm run prisma:migrate --workspace=@rmrp/backend -- --name init`.
-4. Create the first admin: `docker compose exec backend npm run admin:create --workspace=@rmrp/backend`. The command asks for login and password interactively.
-5. Open `http://127.0.0.1:3000`.
+1. Создайте `.env` на основе `.env.example` и укажите уникальные секреты длиной не менее 32 байт.
+2. Запустите сервисы: `docker compose up -d --build`.
+3. Миграции применяются при старте backend автоматически.
+4. Откройте портал по адресу `http://127.0.0.1:3000`.
 
-## Collector login
+## Экзамен
 
-Run `docker compose --profile auth up collector-auth` in a trusted local desktop session, then open `http://127.0.0.1:6080/vnc.html`. Complete Discord login manually in noVNC, then stop the container. The noVNC port binds only to localhost. The persistent browser profile is a Docker volume and must never be exported to Git, environment files, database records, or logs.
+Страница экзамена доступна по адресу `/testing`.
 
-The regular collector has no PostgreSQL connection string or database client. It only obtains source configuration and sends raw messages through the signed internal backend API. Its normal adapter is read-only: it validates a direct channel URL, navigates to it, and reads DOM data. The source and tests prohibit Playwright APIs for clicks, typing, form filling, reactions, and any other Discord mutation. Manual credentials entry is allowed only in the separate `collector-auth` profile.
+- Допуск проверяется по имени, фамилии и номеру паспорта в формате `999-999`.
+- На каждый вопрос выделяется 30 секунд.
+- Вопросы и варианты ответов перемешиваются для новой попытки.
+- Для обычного допуска разрешено не более трех попыток.
+- Результаты доступны администратору по адресу `/testing/report`.
 
-`COLLECTOR_ENABLED=false` is the safe default. The collector sends a degraded heartbeat but does not open Discord until this value is explicitly changed to `true` after a manual login has completed.
+## Discord-бот
 
-## Operational notes
+Веб-парсер Discord удален из Docker Compose и больше не запускается. Следующая интеграция будет выполняться через официального Discord-бота.
 
-- PostgreSQL and collector do not expose host ports.
-- Backend and frontend bind only to `127.0.0.1`.
-- `scripts/backup-db.sh` writes timestamped PostgreSQL dumps to `backups/`; restore with `scripts/restore-db.sh backups/<file>.sql`.
-- Before a VPS deployment, keep the same Compose topology, bind public ports through Nginx only, use HTTPS, set production secrets in the host secret store, and never proxy `/api/internal/*` publicly.
+- Токен бота хранится только в production secret store или локальном `.env` и никогда не попадает в Git, логи или frontend.
+- Боту выдаются только необходимые права на заранее разрешенные каналы.
+- Интеграция должна быть read-only: без отправки сообщений, реакций, личных сообщений и любых изменений на сервере Discord.
+- Обработка должна запускаться только по явному ручному действию, без фонового циклического опроса.
 
-## Current implementation boundary
+## Эксплуатация
 
-Implemented: Docker topology, primary schema, health checks, local session login, RBAC gate, CSRF middleware, Discord source validation, signed collector configuration/message endpoint, raw-message deduplication, sequence parsing/conflict handling, and a minimal frontend entry page.
-
-Not yet implemented: complete admin UI, employee/dictionary CRUD, dashboard data APIs, training parser, review queue UI/actions, materials, tests, complete rate limit/audit wiring, production Nginx configuration, and robust Discord DOM extraction. The collector adapter is explicitly read-only and its selectors live only in `apps/discord-collector/src/discord-selectors.ts`.
+- PostgreSQL не публикуется наружу.
+- Backend и frontend доступны только во внутренней Docker-сети; публичный HTTPS обеспечивает Caddy.
+- Не публикуйте `/api/internal/*` через прокси.
+- Бэкап базы: `scripts/backup-db.sh`; восстановление: `scripts/restore-db.sh backups/<файл>.sql`.
