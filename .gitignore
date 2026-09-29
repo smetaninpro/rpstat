@@ -10,3 +10,5 @@ uploads/
 logs/
 *.log
 tmp-*.txt
+messages.db
+RMRP-Assistant-1.7.0.zip
